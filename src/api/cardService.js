@@ -1,9 +1,9 @@
 // API configuration
 const API_BASE = '/.netlify/functions';
 
-// For development/demo, we'll use mock data
-// In production, these will call actual Netlify functions
-const USE_MOCK = true; // Set to false when APIs are configured
+// Set to false to use real APIs (PokémonTCG.io + PokemonPriceTracker + PSA scraping)
+// Set to true only for local development without API keys
+const USE_MOCK = false;
 
 // Mock data for demonstration
 const MOCK_CARDS = {
