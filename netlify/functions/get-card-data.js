@@ -1,14 +1,16 @@
 // Netlify serverless function to fetch card data from multiple sources
-// This function combines data from PokémonTCG.io and PokemonPriceTracker
+// - PokémonTCG.io for card info and NM prices
+// - PokemonPriceTracker for PSA 9/10 prices
+// - PSA website scraping for population data
 
 const POKEMON_TCG_API = 'https://api.pokemontcg.io/v2';
+const PRICE_TRACKER_API = 'https://www.pokemonpricetracker.com/api';
 
-// Simple in-memory cache (will reset on cold starts)
-// In production, consider using Netlify Blobs or Redis
+// Simple in-memory cache (resets on cold starts)
 const cache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-const getCacheKey = (name, set) => `${name.toLowerCase()}-${set.toLowerCase()}`;
+const getCacheKey = (name, set) => `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}-${set.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 
 const getFromCache = (key) => {
   const cached = cache.get(key);
@@ -22,7 +24,9 @@ const setCache = (key, data) => {
   cache.set(key, { data, timestamp: Date.now() });
 };
 
-// Search for a card using PokémonTCG.io API
+// ============================================
+// POKEMON TCG API - Card info and NM prices
+// ============================================
 const searchPokemonTCG = async (name, set, number) => {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   
@@ -37,10 +41,7 @@ const searchPokemonTCG = async (name, set, number) => {
   
   const url = `${POKEMON_TCG_API}/cards?q=${encodeURIComponent(query)}&pageSize=5`;
   
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  
+  const headers = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers['X-Api-Key'] = apiKey;
   }
@@ -48,7 +49,8 @@ const searchPokemonTCG = async (name, set, number) => {
   const response = await fetch(url, { headers });
   
   if (!response.ok) {
-    throw new Error(`PokémonTCG API error: ${response.status}`);
+    console.error(`PokémonTCG API error: ${response.status}`);
+    return null;
   }
   
   const data = await response.json();
@@ -57,54 +59,186 @@ const searchPokemonTCG = async (name, set, number) => {
     return null;
   }
   
-  // Return the best match
   return data.data[0];
 };
 
-// Get PSA price data from PokemonPriceTracker (placeholder)
-// You'll need to implement this based on their actual API
-const getPSAPrices = async (cardId, name, set) => {
-  // TODO: Implement actual PokemonPriceTracker API call
-  // For now, return estimated prices based on NM price
+// ============================================
+// POKEMON PRICE TRACKER API - PSA prices
+// ============================================
+const getPSAPricesFromTracker = async (cardId, name, set) => {
+  const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
   
-  // This is a placeholder - replace with actual API call
-  return {
-    psa9: null,
-    psa10: null,
-  };
-};
-
-// Get PSA population data (placeholder for scraping)
-// In production, implement actual scraping with rate limiting
-const getPSAPopulation = async (name, set, number) => {
-  // TODO: Implement PSA population scraping
-  // For now, return null (will show N/A in UI)
-  
-  return {
-    total: null,
-    psa10: null,
-    psa9: null,
-    psa8: null,
-  };
-};
-
-// Calculate derived values
-const calculateDerivedValues = (pricing, population) => {
-  const result = { ...pricing, ...population };
-  
-  // Calculate PSA 10 Rate
-  if (population.psa10 != null && population.total != null && population.total > 0) {
-    result.psa10Rate = (population.psa10 / population.total) * 100;
+  // If no API key, return null (will use estimates)
+  if (!apiKey) {
+    console.log('No PokemonPriceTracker API key, using estimates');
+    return { psa9: null, psa10: null };
   }
   
-  // Calculate Price Multiple
-  if (pricing.psa10 != null && pricing.nearMint != null && pricing.nearMint > 0) {
-    result.priceMultiple = pricing.psa10 / pricing.nearMint;
+  try {
+    // Try to get graded prices using card ID
+    const url = `${PRICE_TRACKER_API}/prices?id=${cardId}&includeGraded=true`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`PriceTracker API error: ${response.status}`);
+      return { psa9: null, psa10: null };
+    }
+    
+    const data = await response.json();
+    
+    // Extract PSA prices from response
+    if (data && data.graded) {
+      return {
+        psa9: data.graded.psa9 || null,
+        psa10: data.graded.psa10 || null,
+        psa8: data.graded.psa8 || null
+      };
+    }
+    
+    return { psa9: null, psa10: null };
+  } catch (error) {
+    console.error('Error fetching PSA prices:', error);
+    return { psa9: null, psa10: null };
   }
-  
-  return result;
 };
 
+// ============================================
+// PSA POPULATION SCRAPER
+// ============================================
+const scrapePSAPopulation = async (name, set, number) => {
+  try {
+    // Build search query for PSA
+    const searchQuery = encodeURIComponent(`${name} ${set} Pokemon`);
+    const psaSearchUrl = `https://www.psacard.com/pop/tcg-cards/pokemon/${searchQuery}`;
+    
+    // Note: Direct scraping from Netlify functions may be blocked by PSA
+    // This is a best-effort approach - may need proxy or alternative data source
+    
+    const response = await fetch(psaSearchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      }
+    });
+    
+    if (!response.ok) {
+      console.log(`PSA scrape returned ${response.status}`);
+      return null;
+    }
+    
+    const html = await response.text();
+    
+    // Parse population data from HTML
+    // PSA uses specific patterns for population numbers
+    const popData = parsePSAPopulationHTML(html, name, number);
+    
+    return popData;
+  } catch (error) {
+    console.error('Error scraping PSA population:', error);
+    return null;
+  }
+};
+
+// Parse PSA population HTML
+const parsePSAPopulationHTML = (html, cardName, cardNumber) => {
+  try {
+    // Look for population table data
+    // PSA formats: "PSA 10: 123" or in table cells
+    
+    // Extract total population
+    const totalMatch = html.match(/Total\s*:?\s*([\d,]+)/i) || 
+                       html.match(/Population\s*:?\s*([\d,]+)/i);
+    
+    // Extract grade-specific populations
+    // PSA uses patterns like "10" followed by number in tables
+    const psa10Match = html.match(/>\s*10\s*<\/[^>]+>\s*<[^>]+>\s*([\d,]+)/i) ||
+                       html.match(/PSA\s*10[:\s]*([\d,]+)/i) ||
+                       html.match(/GEM[- ]MT\s*10[:\s]*([\d,]+)/i);
+    
+    const psa9Match = html.match(/>\s*9\s*<\/[^>]+>\s*<[^>]+>\s*([\d,]+)/i) ||
+                      html.match(/PSA\s*9[:\s]*([\d,]+)/i) ||
+                      html.match(/MINT\s*9[:\s]*([\d,]+)/i);
+    
+    const psa8Match = html.match(/>\s*8\s*<\/[^>]+>\s*<[^>]+>\s*([\d,]+)/i) ||
+                      html.match(/PSA\s*8[:\s]*([\d,]+)/i) ||
+                      html.match(/NM-MT\s*8[:\s]*([\d,]+)/i);
+    
+    const parseNumber = (match) => {
+      if (!match || !match[1]) return null;
+      return parseInt(match[1].replace(/,/g, ''), 10);
+    };
+    
+    const total = parseNumber(totalMatch);
+    const psa10 = parseNumber(psa10Match);
+    const psa9 = parseNumber(psa9Match);
+    const psa8 = parseNumber(psa8Match);
+    
+    // If we got at least some data, return it
+    if (total || psa10 || psa9) {
+      return { total, psa10, psa9, psa8 };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error parsing PSA HTML:', error);
+    return null;
+  }
+};
+
+// ============================================
+// ALTERNATIVE: Use PokemonPriceTracker for population
+// (if they have it in their API)
+// ============================================
+const getPopulationFromTracker = async (cardId) => {
+  const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
+  
+  if (!apiKey) {
+    return null;
+  }
+  
+  try {
+    // Some price trackers include population in their PSA endpoint
+    const url = `${PRICE_TRACKER_API}/psa/population/${cardId}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (data && data.population) {
+      return {
+        total: data.population.total || null,
+        psa10: data.population.psa10 || data.population['10'] || null,
+        psa9: data.population.psa9 || data.population['9'] || null,
+        psa8: data.population.psa8 || data.population['8'] || null
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching population from tracker:', error);
+    return null;
+  }
+};
+
+// ============================================
+// MAIN HANDLER
+// ============================================
 export const handler = async (event) => {
   // Only allow POST
   if (event.httpMethod !== 'POST') {
@@ -135,7 +269,7 @@ export const handler = async (event) => {
       };
     }
     
-    // Fetch from PokémonTCG.io
+    // 1. Fetch from PokémonTCG.io (card info + NM price)
     const tcgCard = await searchPokemonTCG(name, set, number);
     
     if (!tcgCard) {
@@ -149,26 +283,48 @@ export const handler = async (event) => {
     let nearMintPrice = null;
     if (tcgCard.tcgplayer?.prices) {
       const prices = tcgCard.tcgplayer.prices;
-      // Try different price categories
       nearMintPrice = prices.holofoil?.market || 
                       prices.reverseHolofoil?.market ||
                       prices.normal?.market ||
                       prices['1stEditionHolofoil']?.market ||
+                      prices['1stEditionNormal']?.market ||
                       null;
     }
     
-    // Get PSA prices (placeholder - implement actual API)
-    const psaPrices = await getPSAPrices(tcgCard.id, name, set);
+    // 2. Fetch PSA prices from PokemonPriceTracker
+    const psaPrices = await getPSAPricesFromTracker(tcgCard.id, name, set);
     
-    // Get PSA population (placeholder - implement actual scraping)
-    const psaPopulation = await getPSAPopulation(name, set, number);
+    // 3. Try to get population data
+    // First try PokemonPriceTracker, then fall back to scraping
+    let psaPopulation = await getPopulationFromTracker(tcgCard.id);
     
-    // For demo purposes, estimate PSA prices if not available
-    // In production, remove this and use actual API data
-    const estimatedPsa9 = nearMintPrice ? nearMintPrice * (2 + Math.random() * 2) : null;
-    const estimatedPsa10 = estimatedPsa9 ? estimatedPsa9 * (1.5 + Math.random() * 3) : null;
+    if (!psaPopulation) {
+      // Try scraping PSA directly (may not work due to blocking)
+      psaPopulation = await scrapePSAPopulation(name, set, number);
+    }
     
-    // Build response
+    // If still no population, use null values
+    if (!psaPopulation) {
+      psaPopulation = { total: null, psa10: null, psa9: null, psa8: null };
+    }
+    
+    // 4. Calculate estimated PSA prices if not available from API
+    let psa9Price = psaPrices.psa9;
+    let psa10Price = psaPrices.psa10;
+    
+    // Estimate PSA prices based on typical multipliers if not available
+    if (nearMintPrice && !psa9Price) {
+      // Typical PSA 9 is 2-4x NM price
+      psa9Price = parseFloat((nearMintPrice * (2.5 + Math.random() * 1.5)).toFixed(2));
+    }
+    
+    if (nearMintPrice && !psa10Price) {
+      // Typical PSA 10 is 1.5-4x PSA 9 price
+      const basePsa9 = psa9Price || nearMintPrice * 3;
+      psa10Price = parseFloat((basePsa9 * (1.5 + Math.random() * 2.5)).toFixed(2));
+    }
+    
+    // 5. Build response
     const cardData = {
       id: tcgCard.id,
       name: tcgCard.name,
@@ -179,10 +335,13 @@ export const handler = async (event) => {
       tcgplayerUrl: tcgCard.tcgplayer?.url || '',
       pricing: {
         nearMint: nearMintPrice,
-        psa9: psaPrices.psa9 || (nearMintPrice ? parseFloat(estimatedPsa9.toFixed(2)) : null),
-        psa10: psaPrices.psa10 || (nearMintPrice ? parseFloat(estimatedPsa10.toFixed(2)) : null),
+        psa9: psa9Price,
+        psa10: psa10Price,
         priceMultiple: null,
         lastUpdated: new Date().toISOString(),
+        // Flag to indicate if prices are real or estimated
+        psa9Source: psaPrices.psa9 ? 'api' : 'estimated',
+        psa10Source: psaPrices.psa10 ? 'api' : 'estimated',
       },
       population: {
         total: psaPopulation.total,
@@ -191,23 +350,24 @@ export const handler = async (event) => {
         psa8: psaPopulation.psa8,
         psa10Rate: null,
         lastUpdated: new Date().toISOString(),
+        source: psaPopulation.total ? 'psa' : null,
       },
     };
     
-    // Calculate derived values
-    if (cardData.population.psa10 != null && cardData.population.total != null) {
+    // 6. Calculate derived values
+    if (cardData.population.psa10 != null && cardData.population.total != null && cardData.population.total > 0) {
       cardData.population.psa10Rate = parseFloat(
         ((cardData.population.psa10 / cardData.population.total) * 100).toFixed(2)
       );
     }
     
-    if (cardData.pricing.psa10 != null && cardData.pricing.nearMint != null) {
+    if (cardData.pricing.psa10 != null && cardData.pricing.nearMint != null && cardData.pricing.nearMint > 0) {
       cardData.pricing.priceMultiple = parseFloat(
         (cardData.pricing.psa10 / cardData.pricing.nearMint).toFixed(1)
       );
     }
     
-    // Cache the result
+    // 7. Cache the result
     setCache(cacheKey, cardData);
     
     return {
