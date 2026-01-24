@@ -1,0 +1,235 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-navy-900: #0a0e1a;
+  --color-navy-800: #111827;
+  --color-electric-500: #3b82f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background-color: var(--color-navy-900);
+  color: #f1f5f9;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Utility classes */
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-electric-400 to-electric-600;
+  }
+  
+  .text-gradient-gold {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-gold-400 to-gold-500;
+  }
+  
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+  
+  .glass-dark {
+    @apply bg-navy-800/80 backdrop-blur-md border border-white/5;
+  }
+  
+  .card-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .card-shine::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent
+    );
+    transition: left 0.5s ease;
+  }
+  
+  .card-shine:hover::before {
+    left: 100%;
+  }
+}
+
+/* Pokemon card holographic effect */
+.holo-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.holo-effect::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    125deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.1) 75%,
+    transparent 100%
+  );
+  background-size: 200% 200%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.holo-effect:hover::after {
+  opacity: 1;
+  animation: holo-shine 1.5s ease infinite;
+}
+
+@keyframes holo-shine {
+  0% {
+    background-position: 200% 0%;
+  }
+  100% {
+    background-position: -200% 0%;
+  }
+}
+
+/* Loading skeleton animation */
+.skeleton {
+  @apply bg-gradient-to-r from-navy-700 via-navy-600 to-navy-700 bg-[length:200%_100%] animate-shimmer;
+}
+
+/* PSA Rate badge styles */
+.psa-badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold;
+}
+
+.psa-badge-excellent {
+  @apply bg-psa-excellent/20 text-psa-excellent border border-psa-excellent/30;
+}
+
+.psa-badge-good {
+  @apply bg-psa-good/20 text-psa-good border border-psa-good/30;
+}
+
+.psa-badge-rare {
+  @apply bg-psa-rare/20 text-psa-rare border border-psa-rare/30;
+}
+
+.psa-badge-legendary {
+  @apply bg-psa-legendary/20 text-psa-legendary border border-psa-legendary/30;
+}
+
+/* Table styles */
+.data-table {
+  @apply w-full text-sm;
+}
+
+.data-table th {
+  @apply px-4 py-3 text-left font-semibold text-slate-400 uppercase tracking-wider text-xs border-b border-white/10;
+}
+
+.data-table td {
+  @apply px-4 py-3 border-b border-white/5;
+}
+
+.data-table tbody tr {
+  @apply transition-colors hover:bg-white/5 cursor-pointer;
+}
+
+/* File drop zone */
+.drop-zone {
+  @apply relative border-2 border-dashed border-white/20 rounded-2xl p-12 text-center transition-all duration-300;
+}
+
+.drop-zone:hover,
+.drop-zone.active {
+  @apply border-electric-500/50 bg-electric-500/5;
+}
+
+.drop-zone.active {
+  @apply scale-[1.02];
+}
+
+/* Button variants */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply bg-electric-500 hover:bg-electric-600 text-white shadow-lg shadow-electric-500/25 hover:shadow-electric-500/40;
+}
+
+.btn-secondary {
+  @apply glass hover:bg-white/10 text-white;
+}
+
+.btn-ghost {
+  @apply hover:bg-white/5 text-slate-400 hover:text-white;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-electric-500/50 focus:ring-2 focus:ring-electric-500/20 transition-all;
+}
+
+/* Card grid responsive */
+.card-grid {
+  @apply grid gap-4;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  .data-table {
+    @apply text-xs;
+  }
+  
+  .data-table th,
+  .data-table td {
+    @apply px-2 py-2;
+  }
+}
+
+/* PWA safe area support */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "Pokémon - The Model",
+  "short_name": "PokéModel",
+  "description": "Track and value your Pokémon card collection with real-time pricing, PSA grades, and grading opportunity analysis.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "finance"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Upload Cards",
+      "url": "/",
+      "description": "Upload a CSV of your card collection"
+    },
+    {
+      "name": "View Collection",
+      "url": "/collection",
+      "description": "View your card collection and pricing data"
+    }
+  ]
+}
