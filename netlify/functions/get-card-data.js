@@ -81,6 +81,7 @@ const searchByPriceTrackerId = async (priceTrackerId) => {
     }
     
     console.log(`✓ Found by ID: "${data.data[0].name}"`);
+    console.log(`  Image fields: image=${data.data[0].image}, imageUrl=${data.data[0].imageUrl}, images=${JSON.stringify(data.data[0].images)}`);
     return data.data[0];
     
   } catch (error) {
@@ -153,12 +154,14 @@ const searchPriceTracker = async (name, set, number) => {
       
       if (exactMatch) {
         console.log(`✓ Found exact match: "${exactMatch.name}" #${exactMatch.number}`);
+        console.log(`  Image fields: image=${exactMatch.image}, imageUrl=${exactMatch.imageUrl}, images=${JSON.stringify(exactMatch.images)}`);
         return exactMatch;
       }
     }
     
     // Return first result if no exact number match
     console.log(`✓ Found: "${data.data[0].name}" (first result)`);
+    console.log(`  Image fields: image=${data.data[0].image}, imageUrl=${data.data[0].imageUrl}, images=${JSON.stringify(data.data[0].images)}`);
     return data.data[0];
     
   } catch (error) {
@@ -289,8 +292,8 @@ export const handler = async (event) => {
       set: card.setName || card.set || set,
       number: card.number || cleanCardNumber(number) || '',
       rarity: card.rarity || '',
-      imageUrl: card.image || card.images?.large || card.images?.small || '',
-      tcgplayerUrl: card.tcgplayerUrl || card.url || '',
+      imageUrl: card.image || card.imageUrl || card.images?.large || card.images?.small || card.img || card.cardImage || '',
+      tcgplayerUrl: card.tcgplayerUrl || card.url || card.tcgPlayerUrl || '',
       pricing: {
         nearMint: nearMintPrice,
         psa9: finalPsa9,
