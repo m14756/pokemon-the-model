@@ -103,7 +103,7 @@ const useStore = create((set, get) => ({
   },
   
   // Re-sync a card with updated name/set/number
-  resyncCard: async (id, name, setName, number, options = { preservePopulation: true }) => {
+  resyncCard: async (id, name, setName, number, options = { preservePopulation: true, priceTrackerId: null }) => {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase not configured');
     }
