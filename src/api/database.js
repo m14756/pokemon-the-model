@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { fetchCardData, processCards } from './cardFetcher';
+import { fetchCardData } from './cardService';
 import { calculateGradingScore } from '../utils/helpers';
 
 // ============================================
@@ -163,64 +163,83 @@ export const deleteAllCards = async () => {
 
 /**
  * Process parsed CSV cards - enrich with API data and save to database
- * Now uses client-side API calls - no timeout limits!
+ * Processes ONE card at a time to avoid timeouts
  */
 export const processAndSaveCards = async (parsedCards, onProgress) => {
   const results = [];
-  
-  // Process cards with progress callback
-  const processedCards = await processCards(parsedCards, (percent, current, total, cardName) => {
-    if (onProgress) {
-      onProgress(percent, `Processing ${current}/${total}: ${cardName}`);
-    }
-  });
-  
-  // Transform to database format and save in batches
-  const batchSize = 20;
-  
-  for (let i = 0; i < processedCards.length; i += batchSize) {
-    const batch = processedCards.slice(i, i + batchSize);
+  const total = parsedCards.length;
+
+  for (let i = 0; i < total; i++) {
+    const card = parsedCards[i];
     
-    const cardsToSave = batch.map((card) => {
-      const gradingScore = calculateGradingScore(card);
+    // Update progress with card name
+    if (onProgress) {
+      const percent = Math.round(((i + 1) / total) * 100);
+      onProgress(percent, `Processing ${i + 1}/${total}: ${card.name}`);
+    }
+    
+    try {
+      const enrichedData = await fetchCardData(card);
+      const gradingScore = calculateGradingScore(enrichedData);
       
-      return {
-        name: card.name,
-        set_name: card.set,
-        card_number: card.number || null,
-        rarity: card.rarity || null,
-        image_url: card.imageUrl || null,
-        tcgplayer_url: card.tcgplayerUrl || null,
-        price_nm: card.pricing?.nearMint || null,
-        price_psa9: card.pricing?.psa9 || null,
-        price_psa10: card.pricing?.psa10 || null,
-        price_multiple: card.pricing?.priceMultiple || null,
-        pop_total: card.population?.total || null,
-        pop_psa10: card.population?.psa10 || null,
-        pop_psa9: card.population?.psa9 || null,
-        pop_psa8: card.population?.psa8 || null,
-        psa10_rate: card.population?.psa10Rate || null,
+      const cardToSave = {
+        name: enrichedData.name,
+        set_name: enrichedData.set,
+        card_number: enrichedData.number || null,
+        rarity: enrichedData.rarity || null,
+        image_url: enrichedData.imageUrl || null,
+        tcgplayer_url: enrichedData.tcgplayerUrl || null,
+        price_nm: enrichedData.pricing?.nearMint || null,
+        price_psa9: enrichedData.pricing?.psa9 || null,
+        price_psa10: enrichedData.pricing?.psa10 || null,
+        price_multiple: enrichedData.pricing?.priceMultiple || null,
+        pop_total: enrichedData.population?.total || null,
+        pop_psa10: enrichedData.population?.psa10 || null,
+        pop_psa9: enrichedData.population?.psa9 || null,
+        pop_psa8: enrichedData.population?.psa8 || null,
+        psa10_rate: enrichedData.population?.psa10Rate || null,
         grading_score: gradingScore.score,
         grading_recommendation: gradingScore.recommendation,
         grading_reasoning: gradingScore.reasoning,
-        status: card.notFound ? 'not_found' : (card.status || 'success'),
+        status: enrichedData.notFound ? 'not_found' : 'success',
       };
-    });
-    
-    // Save to database
-    if (cardsToSave.length > 0 && isSupabaseConfigured()) {
-      try {
-        const savedCards = await addCards(cardsToSave);
-        results.push(...savedCards);
-      } catch (error) {
-        console.error('Error saving batch to database:', error);
-        results.push(...cardsToSave.map(c => ({ ...c, _notSaved: true })));
+      
+      // Save to database immediately
+      if (isSupabaseConfigured()) {
+        try {
+          const savedCard = await addCard(cardToSave);
+          results.push(savedCard);
+        } catch (dbError) {
+          console.error(`Error saving ${card.name}:`, dbError);
+          results.push({ ...cardToSave, _notSaved: true });
+        }
+      } else {
+        results.push(cardToSave);
       }
-    } else {
-      results.push(...cardsToSave);
+    } catch (error) {
+      console.error(`Error processing ${card.name}:`, error);
+      // Save as error
+      const errorCard = {
+        name: card.name,
+        set_name: card.set,
+        card_number: card.number || null,
+        status: 'error',
+        error_message: error.message,
+      };
+      
+      if (isSupabaseConfigured()) {
+        try {
+          const savedCard = await addCard(errorCard);
+          results.push(savedCard);
+        } catch (dbError) {
+          results.push({ ...errorCard, _notSaved: true });
+        }
+      } else {
+        results.push(errorCard);
+      }
     }
   }
-  
+
   return results;
 };
 
@@ -250,8 +269,8 @@ export const resyncCard = async (id, name, set, number, options = { preservePopu
     throw fetchError;
   }
 
-  // Fetch fresh data from API (client-side)
-  const enrichedData = await fetchCardData(name, set, number);
+  // Fetch fresh data from API
+  const enrichedData = await fetchCardData({ name, set, number });
   
   // Check if card was found
   if (enrichedData.notFound) {
