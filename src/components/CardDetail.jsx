@@ -245,31 +245,14 @@ const CardDetail = () => {
               )}
             </div>
             
-            <div className="flex flex-col gap-2 mt-4">
-              <div className="flex gap-2">
-                {card.tcgplayerUrl && (
-                  <a href={card.tcgplayerUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
-                    <ExternalLink size={16} />
-                    TCGPlayer
-                  </a>
-                )}
-                <a href="https://www.psacard.com/pop" target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
+            {card.tcgplayerUrl && (
+              <div className="mt-4">
+                <a href={card.tcgplayerUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary w-full text-sm">
                   <ExternalLink size={16} />
-                  PSA Pop
+                  TCGPlayer
                 </a>
               </div>
-              {card.id && !isNotFound && (
-                <a 
-                  href={`https://www.pokemonpricetracker.com/card/${card.id}`} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="btn btn-secondary w-full text-sm bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 text-amber-400"
-                >
-                  <ExternalLink size={16} />
-                  View on PriceTracker
-                </a>
-              )}
-            </div>
+            )}
           </div>
         </div>
         
@@ -387,14 +370,14 @@ const CardDetail = () => {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                 <div className="p-4 rounded-xl bg-white/5">
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Name</p>
-                  <p className="text-white font-medium">{card.name}</p>
+                  <p className="text-white font-medium break-words">{card.name}</p>
                 </div>
                 <div className="p-4 rounded-xl bg-white/5">
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Set</p>
-                  <p className="text-white font-medium">{card.set}</p>
+                  <p className="text-white font-medium break-words">{card.set}</p>
                 </div>
                 <div className="p-4 rounded-xl bg-white/5">
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Number</p>
@@ -411,7 +394,7 @@ const CardDetail = () => {
               <h2 className="text-lg font-semibold text-white">Pricing</h2>
             </div>
             
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
               <PriceCard label="Near Mint" value={card.pricing?.nearMint} />
               <PriceCard label="PSA 9" value={card.pricing?.psa9} />
               <PriceCard label="PSA 10" value={card.pricing?.psa10} highlight />
@@ -595,16 +578,16 @@ const CardDetail = () => {
 };
 
 const PriceCard = ({ label, value, highlight = false }) => (
-  <div className={`p-4 rounded-xl ${highlight ? 'bg-electric-500/10 border border-electric-500/20' : 'bg-white/5'}`}>
+  <div className={`p-3 sm:p-4 rounded-xl ${highlight ? 'bg-electric-500/10 border border-electric-500/20' : 'bg-white/5'}`}>
     <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">{label}</p>
-    <p className={`font-mono text-xl font-semibold ${highlight ? 'text-electric-400' : 'text-white'}`}>{formatCurrency(value)}</p>
+    <p className={`font-mono text-lg sm:text-xl font-semibold ${highlight ? 'text-electric-400' : 'text-white'}`}>{formatCurrency(value)}</p>
   </div>
 );
 
 const PopCard = ({ label, value, subtext, missing = false }) => (
-  <div className={`p-4 rounded-xl ${missing ? 'bg-amber-500/5 border border-amber-500/20' : 'bg-white/5'}`}>
+  <div className={`p-3 sm:p-4 rounded-xl ${missing ? 'bg-amber-500/5 border border-amber-500/20' : 'bg-white/5'}`}>
     <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">{label}</p>
-    <p className={`font-mono text-xl font-semibold ${missing ? 'text-amber-400' : 'text-white'}`}>{value || 'N/A'}</p>
+    <p className={`font-mono text-lg sm:text-xl font-semibold ${missing ? 'text-amber-400' : 'text-white'}`}>{value || 'N/A'}</p>
     {subtext && <div className="mt-1">{subtext}</div>}
   </div>
 );
