@@ -194,6 +194,7 @@ export const fetchCardData = async (card) => {
         name: card.name,
         set: card.set,
         number: card.number,
+        priceTrackerId: card.priceTrackerId || null,
       }),
     });
     

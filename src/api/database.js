@@ -252,7 +252,7 @@ export const processAndSaveCards = async (parsedCards, onProgress) => {
  * @param {object} options - Options for re-sync
  * @param {boolean} options.preservePopulation - If true, keep existing population data
  */
-export const resyncCard = async (id, name, set, number, options = { preservePopulation: true }) => {
+export const resyncCard = async (id, name, set, number, options = { preservePopulation: true, priceTrackerId: null }) => {
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase not configured');
   }
@@ -269,8 +269,13 @@ export const resyncCard = async (id, name, set, number, options = { preservePopu
     throw fetchError;
   }
 
-  // Fetch fresh data from API
-  const enrichedData = await fetchCardData({ name, set, number });
+  // Fetch fresh data from API (with optional priceTrackerId for exact matching)
+  const enrichedData = await fetchCardData({ 
+    name, 
+    set, 
+    number, 
+    priceTrackerId: options.priceTrackerId 
+  });
   
   // Check if card was found
   if (enrichedData.notFound) {
