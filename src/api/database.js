@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { fetchCardData } from './cardService';
+import { fetchCardData, processCards } from './cardFetcher';
 import { calculateGradingScore } from '../utils/helpers';
 
 // ============================================
@@ -163,75 +163,50 @@ export const deleteAllCards = async () => {
 
 /**
  * Process parsed CSV cards - enrich with API data and save to database
+ * Now uses client-side API calls - no timeout limits!
  */
 export const processAndSaveCards = async (parsedCards, onProgress) => {
   const results = [];
-  const batchSize = 10; // Process 10 cards at a time
-
-  for (let i = 0; i < parsedCards.length; i += batchSize) {
-    const batch = parsedCards.slice(i, i + batchSize);
-
-    // Fetch enriched data for each card
-    const enrichedBatch = await Promise.allSettled(
-      batch.map(async (card) => {
-        try {
-          const enrichedData = await fetchCardData(card);
-          const gradingScore = calculateGradingScore(enrichedData);
-          
-          return {
-            // Don't include the temporary id - let Supabase generate UUID
-            name: enrichedData.name,
-            set_name: enrichedData.set,
-            card_number: enrichedData.number || null,
-            rarity: enrichedData.rarity || null,
-            image_url: enrichedData.imageUrl || null,
-            tcgplayer_url: enrichedData.tcgplayerUrl || null,
-            price_nm: enrichedData.pricing?.nearMint || null,
-            price_psa9: enrichedData.pricing?.psa9 || null,
-            price_psa10: enrichedData.pricing?.psa10 || null,
-            price_multiple: enrichedData.pricing?.priceMultiple || null,
-            pop_total: enrichedData.population?.total || null,
-            pop_psa10: enrichedData.population?.psa10 || null,
-            pop_psa9: enrichedData.population?.psa9 || null,
-            pop_psa8: enrichedData.population?.psa8 || null,
-            psa10_rate: enrichedData.population?.psa10Rate || null,
-            grading_score: gradingScore.score,
-            grading_recommendation: gradingScore.recommendation,
-            grading_reasoning: gradingScore.reasoning,
-            status: enrichedData.notFound ? 'not_found' : 'success',
-          };
-        } catch (error) {
-          return {
-            name: card.name,
-            set_name: card.set,
-            card_number: card.number || null,
-            rarity: null,
-            image_url: null,
-            tcgplayer_url: null,
-            price_nm: null,
-            price_psa9: null,
-            price_psa10: null,
-            price_multiple: null,
-            pop_total: null,
-            pop_psa10: null,
-            pop_psa9: null,
-            pop_psa8: null,
-            psa10_rate: null,
-            grading_score: null,
-            grading_recommendation: 'N/A',
-            grading_reasoning: 'Failed to fetch data',
-            status: 'error',
-            error_message: error.message,
-          };
-        }
-      })
-    );
-
-    // Extract successful results
-    const cardsToSave = enrichedBatch
-      .filter(r => r.status === 'fulfilled')
-      .map(r => r.value);
-
+  
+  // Process cards with progress callback
+  const processedCards = await processCards(parsedCards, (percent, current, total, cardName) => {
+    if (onProgress) {
+      onProgress(percent, `Processing ${current}/${total}: ${cardName}`);
+    }
+  });
+  
+  // Transform to database format and save in batches
+  const batchSize = 20;
+  
+  for (let i = 0; i < processedCards.length; i += batchSize) {
+    const batch = processedCards.slice(i, i + batchSize);
+    
+    const cardsToSave = batch.map((card) => {
+      const gradingScore = calculateGradingScore(card);
+      
+      return {
+        name: card.name,
+        set_name: card.set,
+        card_number: card.number || null,
+        rarity: card.rarity || null,
+        image_url: card.imageUrl || null,
+        tcgplayer_url: card.tcgplayerUrl || null,
+        price_nm: card.pricing?.nearMint || null,
+        price_psa9: card.pricing?.psa9 || null,
+        price_psa10: card.pricing?.psa10 || null,
+        price_multiple: card.pricing?.priceMultiple || null,
+        pop_total: card.population?.total || null,
+        pop_psa10: card.population?.psa10 || null,
+        pop_psa9: card.population?.psa9 || null,
+        pop_psa8: card.population?.psa8 || null,
+        psa10_rate: card.population?.psa10Rate || null,
+        grading_score: gradingScore.score,
+        grading_recommendation: gradingScore.recommendation,
+        grading_reasoning: gradingScore.reasoning,
+        status: card.notFound ? 'not_found' : (card.status || 'success'),
+      };
+    });
+    
     // Save to database
     if (cardsToSave.length > 0 && isSupabaseConfigured()) {
       try {
@@ -239,20 +214,13 @@ export const processAndSaveCards = async (parsedCards, onProgress) => {
         results.push(...savedCards);
       } catch (error) {
         console.error('Error saving batch to database:', error);
-        // Still add to results but mark as not saved
         results.push(...cardsToSave.map(c => ({ ...c, _notSaved: true })));
       }
     } else {
       results.push(...cardsToSave);
     }
-
-    // Report progress
-    if (onProgress) {
-      const progress = Math.min(100, Math.round(((i + batchSize) / parsedCards.length) * 100));
-      onProgress(progress);
-    }
   }
-
+  
   return results;
 };
 
@@ -282,8 +250,8 @@ export const resyncCard = async (id, name, set, number, options = { preservePopu
     throw fetchError;
   }
 
-  // Fetch fresh data from API
-  const enrichedData = await fetchCardData({ name, set, number });
+  // Fetch fresh data from API (client-side)
+  const enrichedData = await fetchCardData(name, set, number);
   
   // Check if card was found
   if (enrichedData.notFound) {
