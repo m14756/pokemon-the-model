@@ -23,6 +23,7 @@ const useStore = create((set, get) => ({
     maxPrice: null,
     minPsa10Rate: null,
     maxPsa10Rate: null,
+    missingPopulation: false,
   },
   
   // Selected card for detail view
@@ -114,6 +115,7 @@ const useStore = create((set, get) => ({
       maxPrice: null,
       minPsa10Rate: null,
       maxPsa10Rate: null,
+      missingPopulation: false,
     }
   }),
   
@@ -164,6 +166,13 @@ const useStore = create((set, get) => ({
     if (state.filters.maxPsa10Rate !== null) {
       filtered = filtered.filter(card => 
         card.population?.psa10Rate <= state.filters.maxPsa10Rate
+      );
+    }
+    
+    // Missing population filter
+    if (state.filters.missingPopulation) {
+      filtered = filtered.filter(card => 
+        !card.population?.total || !card.population?.psa10
       );
     }
     
