@@ -8,6 +8,7 @@ import {
   X,
   ArrowUpDown,
   AlertCircle,
+  AlertTriangle,
   TrendingUp,
   Trash2,
   Clock
@@ -47,11 +48,18 @@ const CardTable = () => {
     getUniqueSets,
     setSelectedCardId,
     removeCard,
+    cards,
   } = useStore();
   
-  const cards = getFilteredCards();
+  const filteredCards = getFilteredCards();
   const stats = getCollectionStats();
   const sets = getUniqueSets();
+  
+  // Calculate missing population count
+  const missingPopulationCount = cards.filter(c => !c.population?.total || !c.population?.psa10).length;
+  
+  // Check if a card has missing population
+  const hasMissingPopulation = (card) => !card.population?.total || !card.population?.psa10;
   
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -93,12 +101,12 @@ const CardTable = () => {
     </th>
   );
   
-  const hasActiveFilters = Object.values(filters).some(v => v !== null);
+  const hasActiveFilters = Object.values(filters).some(v => v !== null && v !== false);
   
   return (
     <div className="space-y-4">
       {/* Stats Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         <StatCard label="Cards" value={stats.totalCards} />
         <StatCard 
           label="NM Value" 
@@ -121,6 +129,15 @@ const CardTable = () => {
         <StatCard 
           label="Avg Multiple" 
           value={formatMultiple(stats.avgPriceMultiple)} 
+        />
+        <StatCard 
+          label="Missing Pop" 
+          value={missingPopulationCount}
+          warning={missingPopulationCount > 0}
+          onClick={() => {
+            setFilter('missingPopulation', !filters.missingPopulation);
+            setShowFilters(true);
+          }}
         />
       </div>
       
@@ -206,6 +223,27 @@ const CardTable = () => {
               </select>
             </div>
             
+            {/* Missing Population Filter */}
+            <div>
+              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
+                Data Status
+              </label>
+              <button
+                onClick={() => setFilter('missingPopulation', !filters.missingPopulation)}
+                className={`w-full px-4 py-2 rounded-xl border transition-colors flex items-center justify-center gap-2 ${
+                  filters.missingPopulation 
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' 
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:border-white/20'
+                }`}
+              >
+                <AlertTriangle size={16} />
+                Missing Population
+                {filters.missingPopulation && (
+                  <span className="ml-1">({missingPopulationCount})</span>
+                )}
+              </button>
+            </div>
+            
             {/* PSA 10 Rate Range */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
@@ -263,7 +301,12 @@ const CardTable = () => {
       
       {/* Results count */}
       <p className="text-slate-500 text-sm">
-        Showing {cards.length} of {stats.totalCards} cards
+        Showing {filteredCards.length} of {stats.totalCards} cards
+        {filters.missingPopulation && (
+          <span className="text-amber-400 ml-2">
+            (filtered to missing population data)
+          </span>
+        )}
       </p>
       
       {/* Table */}
@@ -285,26 +328,34 @@ const CardTable = () => {
               </tr>
             </thead>
             <tbody>
-              {cards.map((card) => (
+              {filteredCards.map((card) => (
                 <tr
                   key={card.id}
                   onClick={() => handleCardClick(card)}
-                  className={card.status === 'error' ? 'opacity-50' : ''}
+                  className={`${card.status === 'error' ? 'opacity-50' : ''} ${hasMissingPopulation(card) ? 'bg-amber-500/5' : ''}`}
                 >
                   {/* Image */}
                   <td className="w-16">
-                    {card.imageUrl ? (
-                      <img
-                        src={card.imageUrl}
-                        alt={card.name}
-                        className="w-12 h-16 object-contain rounded"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-12 h-16 bg-white/5 rounded flex items-center justify-center">
-                        <span className="text-2xl">🃏</span>
-                      </div>
-                    )}
+                    <div className="relative">
+                      {card.imageUrl ? (
+                        <img
+                          src={card.imageUrl}
+                          alt={card.name}
+                          className="w-12 h-16 object-contain rounded"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-12 h-16 bg-white/5 rounded flex items-center justify-center">
+                          <span className="text-2xl">🃏</span>
+                        </div>
+                      )}
+                      {/* Missing population indicator badge */}
+                      {hasMissingPopulation(card) && (
+                        <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center" title="Missing population data">
+                          <AlertTriangle size={10} className="text-white" />
+                        </div>
+                      )}
+                    </div>
                   </td>
                   
                   {/* Name & Number */}
@@ -382,7 +433,7 @@ const CardTable = () => {
       </div>
       
       {/* Empty State */}
-      {cards.length === 0 && (
+      {filteredCards.length === 0 && (
         <div className="text-center py-12">
           <AlertCircle className="w-12 h-12 text-slate-600 mx-auto mb-4" />
           <p className="text-slate-400">No cards match your search criteria</p>
@@ -393,10 +444,16 @@ const CardTable = () => {
 };
 
 // Stat Card Component
-const StatCard = ({ label, value, highlight = false }) => (
-  <div className="glass rounded-xl p-4">
+const StatCard = ({ label, value, highlight = false, warning = false, onClick }) => (
+  <div 
+    className={`glass rounded-xl p-4 ${onClick ? 'cursor-pointer hover:bg-white/10 transition-colors' : ''} ${warning ? 'ring-1 ring-amber-500/50' : ''}`}
+    onClick={onClick}
+  >
     <p className="text-slate-500 text-xs uppercase tracking-wide mb-1">{label}</p>
-    <p className={`font-mono text-lg font-semibold ${highlight ? 'text-electric-400' : 'text-white'}`}>
+    <p className={`font-mono text-lg font-semibold ${
+      warning ? 'text-amber-400' : 
+      highlight ? 'text-electric-400' : 'text-white'
+    }`}>
       {value}
     </p>
   </div>

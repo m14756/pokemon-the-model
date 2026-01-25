@@ -203,17 +203,12 @@ const FileUpload = () => {
       {/* Hero Section */}
       <div className="text-center mb-12">
         <h1 className="font-display text-4xl sm:text-5xl text-white mb-4">
-          {cards.length > 0 ? (
-            <>ADD TO YOUR <span className="text-gradient">COLLECTION</span></>
-          ) : (
-            <>VALUE YOUR <span className="text-gradient">COLLECTION</span></>
-          )}
+          ANALYZE YOUR <span className="text-gradient">LIST</span>
         </h1>
         <p className="text-slate-400 text-lg max-w-lg mx-auto">
-          {cards.length > 0 ? (
-            <>Upload more cards to add to your shared collection. Currently tracking <span className="text-electric-400 font-semibold">{cards.length}</span> cards.</>
-          ) : (
-            <>Upload your Pokémon card list to instantly get Near Mint prices, PSA graded values, and population data.</>
+          Upload your Pokémon card list to instantly get Near Mint prices, PSA graded values, and population data.
+          {cards.length > 0 && (
+            <> Currently tracking <span className="text-electric-400 font-semibold">{cards.length}</span> cards.</>
           )}
         </p>
         {!isDbConfigured && (
