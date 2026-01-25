@@ -166,7 +166,7 @@ export const deleteAllCards = async () => {
  */
 export const processAndSaveCards = async (parsedCards, onProgress) => {
   const results = [];
-  const batchSize = 5;
+  const batchSize = 10; // Process 10 cards at a time
 
   for (let i = 0; i < parsedCards.length; i += batchSize) {
     const batch = parsedCards.slice(i, i + batchSize);
