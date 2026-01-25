@@ -49,9 +49,13 @@ export const getPsa10RateCategory = (rate) => {
 };
 
 // Calculate grading opportunity score (0-100)
+// Based on two factors:
+// 1. Price Multiple (50%) - How much more valuable is PSA 10 vs raw?
+// 2. PSA 10 Rate (50%) - How rare/difficult is it to get a PSA 10?
 export const calculateGradingScore = (card) => {
   const { pricing, population } = card;
   
+  // Need price multiple and PSA 10 rate to calculate
   if (!pricing?.psa10 || !pricing?.nearMint || !population?.psa10Rate) {
     return { score: null, recommendation: 'N/A', reasoning: 'Insufficient data' };
   }
@@ -59,81 +63,57 @@ export const calculateGradingScore = (card) => {
   let score = 0;
   const reasons = [];
   
-  // Price Multiple factor (40% weight)
+  // Price Multiple factor (50% weight)
+  // Higher multiple = better grading opportunity
   const multiple = pricing.priceMultiple || 0;
   if (multiple >= 20) {
-    score += 40;
-    reasons.push(`Exceptional multiple (${multiple.toFixed(1)}x)`);
+    score += 50;
+    reasons.push(`Exceptional ${multiple.toFixed(1)}x multiple`);
   } else if (multiple >= 10) {
-    score += 32;
-    reasons.push(`High multiple (${multiple.toFixed(1)}x)`);
+    score += 40;
+    reasons.push(`High ${multiple.toFixed(1)}x multiple`);
   } else if (multiple >= 5) {
-    score += 24;
-    reasons.push(`Good multiple (${multiple.toFixed(1)}x)`);
-  } else if (multiple >= 2) {
-    score += 16;
-    reasons.push(`Moderate multiple (${multiple.toFixed(1)}x)`);
-  } else {
-    score += 8;
-    reasons.push(`Low multiple (${multiple.toFixed(1)}x)`);
-  }
-  
-  // PSA 10 Rate factor (30% weight) - lower is better
-  const rate = population.psa10Rate;
-  if (rate < 1) {
     score += 30;
-    reasons.push(`Very rare PSA 10 (${rate.toFixed(1)}%)`);
-  } else if (rate < 5) {
-    score += 24;
-    reasons.push(`Rare PSA 10 (${rate.toFixed(1)}%)`);
-  } else if (rate < 10) {
-    score += 18;
-    reasons.push(`Moderate PSA 10 rate (${rate.toFixed(1)}%)`);
-  } else if (rate < 15) {
-    score += 12;
-    reasons.push(`Common PSA 10 rate (${rate.toFixed(1)}%)`);
-  } else {
-    score += 6;
-    reasons.push(`High PSA 10 rate (${rate.toFixed(1)}%)`);
-  }
-  
-  // PSA 10 Value factor (20% weight)
-  const psa10Value = pricing.psa10;
-  if (psa10Value >= 1000) {
+    reasons.push(`Good ${multiple.toFixed(1)}x multiple`);
+  } else if (multiple >= 3) {
     score += 20;
-    reasons.push(`High PSA 10 value ($${psa10Value.toLocaleString()})`);
-  } else if (psa10Value >= 500) {
-    score += 16;
-    reasons.push(`Good PSA 10 value ($${psa10Value.toLocaleString()})`);
-  } else if (psa10Value >= 100) {
-    score += 12;
-    reasons.push(`Moderate PSA 10 value ($${psa10Value.toLocaleString()})`);
-  } else if (psa10Value >= 50) {
-    score += 8;
-    reasons.push(`Low PSA 10 value ($${psa10Value.toLocaleString()})`);
+    reasons.push(`Moderate ${multiple.toFixed(1)}x multiple`);
+  } else if (multiple >= 2) {
+    score += 10;
+    reasons.push(`Low ${multiple.toFixed(1)}x multiple`);
   } else {
-    score += 4;
+    score += 5;
+    reasons.push(`Minimal ${multiple.toFixed(1)}x multiple`);
   }
   
-  // Market liquidity factor (10% weight) - based on total population
-  const totalPop = population.total || 0;
-  if (totalPop >= 1000) {
+  // PSA 10 Rate factor (50% weight) - lower is better
+  // Lower rate = harder to get PSA 10 = more valuable when achieved
+  const rate = population.psa10Rate;
+  if (rate < 5) {
+    score += 50;
+    reasons.push(`rare ${rate.toFixed(1)}% PSA 10 rate`);
+  } else if (rate < 15) {
+    score += 40;
+    reasons.push(`low ${rate.toFixed(1)}% PSA 10 rate`);
+  } else if (rate < 30) {
+    score += 30;
+    reasons.push(`moderate ${rate.toFixed(1)}% PSA 10 rate`);
+  } else if (rate < 50) {
+    score += 20;
+    reasons.push(`common ${rate.toFixed(1)}% PSA 10 rate`);
+  } else if (rate < 70) {
     score += 10;
-  } else if (totalPop >= 500) {
-    score += 8;
-  } else if (totalPop >= 100) {
-    score += 6;
-  } else if (totalPop >= 50) {
-    score += 4;
+    reasons.push(`high ${rate.toFixed(1)}% PSA 10 rate`);
   } else {
-    score += 2;
+    score += 5;
+    reasons.push(`very high ${rate.toFixed(1)}% PSA 10 rate`);
   }
   
   // Determine recommendation
   let recommendation;
-  if (score >= 90) recommendation = 'EXCELLENT';
-  else if (score >= 70) recommendation = 'GOOD';
-  else if (score >= 50) recommendation = 'MODERATE';
+  if (score >= 80) recommendation = 'EXCELLENT';
+  else if (score >= 60) recommendation = 'GOOD';
+  else if (score >= 40) recommendation = 'MODERATE';
   else recommendation = 'LOW';
   
   return {
