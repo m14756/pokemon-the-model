@@ -198,7 +198,7 @@ export const processAndSaveCards = async (parsedCards, onProgress) => {
             grading_score: gradingScore.score,
             grading_recommendation: gradingScore.recommendation,
             grading_reasoning: gradingScore.reasoning,
-            status: 'success',
+            status: enrichedData.notFound ? 'not_found' : 'success',
           };
         } catch (error) {
           return {
@@ -254,6 +254,102 @@ export const processAndSaveCards = async (parsedCards, onProgress) => {
   }
 
   return results;
+};
+
+/**
+ * Re-sync a card with updated name/set/number - fetches fresh data from API
+ * @param {string} id - Card UUID
+ * @param {string} name - Card name to search
+ * @param {string} set - Set name to search
+ * @param {string} number - Card number to search
+ * @param {object} options - Options for re-sync
+ * @param {boolean} options.preservePopulation - If true, keep existing population data
+ */
+export const resyncCard = async (id, name, set, number, options = { preservePopulation: true }) => {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase not configured');
+  }
+
+  // First, get the current card data (to preserve population if needed)
+  const { data: currentCard, error: fetchError } = await supabase
+    .from('cards')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (fetchError) {
+    console.error('Error fetching current card:', fetchError);
+    throw fetchError;
+  }
+
+  // Fetch fresh data from API
+  const enrichedData = await fetchCardData({ name, set, number });
+  
+  // Check if card was found
+  if (enrichedData.notFound) {
+    throw new Error('Card not found in API. Try adjusting the name or set.');
+  }
+  
+  // Calculate grading score with potentially preserved population
+  const populationForScore = options.preservePopulation && currentCard.pop_total
+    ? {
+        total: currentCard.pop_total,
+        psa10: currentCard.pop_psa10,
+        psa9: currentCard.pop_psa9,
+        psa8: currentCard.pop_psa8,
+        psa10Rate: currentCard.psa10_rate,
+      }
+    : enrichedData.population;
+
+  const cardForGrading = {
+    ...enrichedData,
+    population: populationForScore,
+  };
+  
+  const gradingScore = calculateGradingScore(cardForGrading);
+
+  // Build update object
+  const updates = {
+    name: enrichedData.name,
+    set_name: enrichedData.set,
+    card_number: enrichedData.number || null,
+    rarity: enrichedData.rarity || null,
+    image_url: enrichedData.imageUrl || null,
+    tcgplayer_url: enrichedData.tcgplayerUrl || null,
+    price_nm: enrichedData.pricing?.nearMint || null,
+    price_psa9: enrichedData.pricing?.psa9 || null,
+    price_psa10: enrichedData.pricing?.psa10 || null,
+    price_multiple: enrichedData.pricing?.priceMultiple || null,
+    grading_score: gradingScore.score,
+    grading_recommendation: gradingScore.recommendation,
+    grading_reasoning: gradingScore.reasoning,
+    status: 'success',
+    error_message: null,
+  };
+
+  // Preserve or overwrite population based on option
+  if (!options.preservePopulation) {
+    updates.pop_total = enrichedData.population?.total || null;
+    updates.pop_psa10 = enrichedData.population?.psa10 || null;
+    updates.pop_psa9 = enrichedData.population?.psa9 || null;
+    updates.pop_psa8 = enrichedData.population?.psa8 || null;
+    updates.psa10_rate = enrichedData.population?.psa10Rate || null;
+  }
+
+  // Update in database
+  const { data, error } = await supabase
+    .from('cards')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating card:', error);
+    throw error;
+  }
+
+  return data;
 };
 
 /**
