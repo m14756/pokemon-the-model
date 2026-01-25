@@ -24,9 +24,54 @@ const setCache = (key, data) => {
 };
 
 // ============================================
+// CARD NUMBER CLEANING
+// ============================================
+const cleanCardNumber = (number) => {
+  if (!number) return null;
+  
+  let cleaned = number.toString().trim();
+  
+  // Remove # symbol
+  cleaned = cleaned.replace(/^#/, '');
+  
+  // Take part before slash (e.g., "76/108" -> "76", "GG67/GG70" -> "GG67")
+  if (cleaned.includes('/')) {
+    cleaned = cleaned.split('/')[0];
+  }
+  
+  // Strip leading zeros ONLY if purely numeric (not "GG67", "TG20", "SWSH062")
+  if (/^\d+$/.test(cleaned)) {
+    cleaned = parseInt(cleaned, 10).toString();
+  }
+  
+  return cleaned || null;
+};
+
+// ============================================
+// SET NAME CLEANING
+// ============================================
+const getSetVariations = (set) => {
+  if (!set) return [];
+  
+  const variations = [set];
+  
+  // If set has a colon, also try the base set (e.g., "Celebrations: Classic Collection" -> "Celebrations")
+  if (set.includes(':')) {
+    variations.push(set.split(':')[0].trim());
+  }
+  
+  // If set has "Gallery" or "Galarian Gallery", also try without it
+  if (set.toLowerCase().includes('gallery')) {
+    variations.push(set.replace(/\s*(galarian\s+)?gallery/i, '').trim());
+  }
+  
+  return [...new Set(variations)]; // Remove duplicates
+};
+
+// ============================================
 // POKEMON TCG API - Card info and NM prices
 // ============================================
-const searchPokemonTCG = async (name, set, number) => {
+const searchPokemonTCG = async (name, set, number, timeout = 5000) => {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   
   // Build search query
@@ -35,7 +80,7 @@ const searchPokemonTCG = async (name, set, number) => {
     query += ` set.name:"${set}"`;
   }
   if (number) {
-    query += ` number:"${number.split('/')[0]}"`;
+    query += ` number:"${number}"`;
   }
   
   const url = `${POKEMON_TCG_API}/cards?q=${encodeURIComponent(query)}&pageSize=5`;
@@ -45,20 +90,72 @@ const searchPokemonTCG = async (name, set, number) => {
     headers['X-Api-Key'] = apiKey;
   }
   
-  const response = await fetch(url, { headers });
+  // Add timeout using AbortController
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
   
-  if (!response.ok) {
-    console.error(`PokémonTCG API error: ${response.status}`);
+  try {
+    const response = await fetch(url, { headers, signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.error(`PokémonTCG API error: ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (!data.data || data.data.length === 0) {
+      return null;
+    }
+    
+    return data.data[0];
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.log(`Search timed out for: ${name}`);
+    }
     return null;
   }
+};
+
+// ============================================
+// FALLBACK SEARCH STRATEGY
+// ============================================
+const searchWithFallback = async (name, set, number) => {
+  const cleanedNumber = cleanCardNumber(number);
+  const setVariations = getSetVariations(set);
   
-  const data = await response.json();
-  
-  if (!data.data || data.data.length === 0) {
-    return null;
+  // Attempt 1: Name + Set + Number (most precise)
+  if (cleanedNumber && set) {
+    console.log(`Attempt 1: "${name}" + "${set}" + "${cleanedNumber}"`);
+    const result = await searchPokemonTCG(name, set, cleanedNumber);
+    if (result) {
+      console.log(`✓ Found "${name}" on attempt 1 (name+set+number)`);
+      return result;
+    }
   }
   
-  return data.data[0];
+  // Attempt 2: Name + Set variations (no number)
+  for (const setVariation of setVariations) {
+    console.log(`Attempt 2: "${name}" + "${setVariation}" (no number)`);
+    const result = await searchPokemonTCG(name, setVariation, null);
+    if (result) {
+      console.log(`✓ Found "${name}" on attempt 2 (name+set: "${setVariation}")`);
+      return result;
+    }
+  }
+  
+  // Attempt 3: Name only (last resort)
+  console.log(`Attempt 3: "${name}" only`);
+  const result = await searchPokemonTCG(name, null, null);
+  if (result) {
+    console.log(`✓ Found "${name}" on attempt 3 (name only)`);
+    return result;
+  }
+  
+  console.log(`✗ All attempts failed for "${name}"`);
+  return null;
 };
 
 // ============================================
@@ -77,12 +174,18 @@ const getPSAPricesFromTracker = async (cardId, name, set) => {
     // Try to get graded prices using card ID
     const url = `${PRICE_TRACKER_API}/prices?id=${cardId}&includeGraded=true`;
     
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
     const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       console.error(`PriceTracker API error: ${response.status}`);
@@ -102,7 +205,11 @@ const getPSAPricesFromTracker = async (cardId, name, set) => {
     
     return { psa9: null, psa10: null };
   } catch (error) {
-    console.error('Error fetching PSA prices:', error);
+    if (error.name === 'AbortError') {
+      console.log('PriceTracker API timed out');
+    } else {
+      console.error('Error fetching PSA prices:', error);
+    }
     return { psa9: null, psa10: null };
   }
 };
@@ -133,6 +240,7 @@ export const handler = async (event) => {
     const cacheKey = getCacheKey(name, set);
     const cached = getFromCache(cacheKey);
     if (cached) {
+      console.log(`Cache hit for "${name}"`);
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -140,13 +248,46 @@ export const handler = async (event) => {
       };
     }
     
-    // 1. Fetch from PokémonTCG.io (card info + NM price)
-    const tcgCard = await searchPokemonTCG(name, set, number);
+    // 1. Search with fallback strategy
+    console.log(`\n=== Searching for: "${name}" | "${set}" | "${number}" ===`);
+    const tcgCard = await searchWithFallback(name, set, number);
     
     if (!tcgCard) {
+      console.log(`Card not found: "${name}" - returning partial data`);
+      // Return partial data so the card still gets saved with "not found" status
+      const notFoundData = {
+        id: null,
+        name: name,
+        set: set,
+        number: cleanCardNumber(number) || '',
+        rarity: '',
+        imageUrl: '',
+        tcgplayerUrl: '',
+        pricing: {
+          nearMint: null,
+          psa9: null,
+          psa10: null,
+          priceMultiple: null,
+          lastUpdated: new Date().toISOString(),
+          psa9Source: null,
+          psa10Source: null,
+        },
+        population: {
+          total: null,
+          psa10: null,
+          psa9: null,
+          psa8: null,
+          psa10Rate: null,
+          lastUpdated: null,
+          source: null,
+        },
+        notFound: true,
+      };
+      
       return {
-        statusCode: 404,
-        body: JSON.stringify({ error: 'Card not found' }),
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notFoundData),
       };
     }
     
@@ -186,7 +327,7 @@ export const handler = async (event) => {
       id: tcgCard.id,
       name: tcgCard.name,
       set: tcgCard.set?.name || set,
-      number: tcgCard.number || number || '',
+      number: tcgCard.number || cleanCardNumber(number) || '',
       rarity: tcgCard.rarity || '',
       imageUrl: tcgCard.images?.large || tcgCard.images?.small || '',
       tcgplayerUrl: tcgCard.tcgplayer?.url || '',
@@ -220,6 +361,8 @@ export const handler = async (event) => {
     
     // 6. Cache the result
     setCache(cacheKey, cardData);
+    
+    console.log(`✓ Successfully processed "${cardData.name}" from "${cardData.set}"`);
     
     return {
       statusCode: 200,
