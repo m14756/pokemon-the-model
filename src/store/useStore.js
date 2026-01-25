@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getAllCards, deleteCard as dbDeleteCard, dbRowsToCards } from '../api/database';
+import { getAllCards, deleteCard as dbDeleteCard, dbRowsToCards, resyncCard as dbResyncCard, dbRowToCard } from '../api/database';
 import { isSupabaseConfigured } from '../api/supabase';
 
 const useStore = create((set, get) => ({
@@ -28,17 +28,19 @@ const useStore = create((set, get) => ({
     // PSA 10 Rate filters
     minPsa10Rate: null,
     maxPsa10Rate: null,
-    // Price Multiple filters (NEW)
+    // Price Multiple filters
     minPriceMultiple: null,
     maxPriceMultiple: null,
-    // Grading Score filters (NEW)
+    // Grading Score filters
     minGradingScore: null,
     maxGradingScore: null,
     // Missing data filter
     missingPopulation: false,
+    // Not found filter (cards with no pricing data)
+    notFound: false,
   },
   
-  // Pagination (NEW)
+  // Pagination
   pageSize: 20, // 10, 20, 50, 100, or 'all'
   currentPage: 1,
   
@@ -100,6 +102,33 @@ const useStore = create((set, get) => ({
     }
   },
   
+  // Re-sync a card with updated name/set/number
+  resyncCard: async (id, name, setName, number, options = { preservePopulation: true }) => {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase not configured');
+    }
+    
+    try {
+      // Call database function to re-sync
+      const updatedDbRow = await dbResyncCard(id, name, setName, number, options);
+      
+      // Transform to frontend format
+      const updatedCard = dbRowToCard(updatedDbRow);
+      
+      // Update in local state
+      set((state) => ({
+        cards: state.cards.map(card => 
+          card.id === id ? updatedCard : card
+        )
+      }));
+      
+      return updatedCard;
+    } catch (error) {
+      console.error('Failed to resync card:', error);
+      throw error;
+    }
+  },
+  
   clearCards: () => set({ cards: [], error: null, currentPage: 1 }),
   
   setLoading: (isLoading) => set({ isLoading }),
@@ -140,11 +169,12 @@ const useStore = create((set, get) => ({
       minGradingScore: null,
       maxGradingScore: null,
       missingPopulation: false,
+      notFound: false,
     },
     currentPage: 1
   }),
   
-  // Pagination actions (NEW)
+  // Pagination actions
   setPageSize: (size) => set({ pageSize: size, currentPage: 1 }),
   setCurrentPage: (page) => set({ currentPage: page }),
   nextPage: () => set((state) => ({ currentPage: state.currentPage + 1 })),
@@ -176,7 +206,7 @@ const useStore = create((set, get) => ({
       filtered = filtered.filter(card => card.rarity === state.filters.rarity);
     }
     
-    // NM Price filters (NEW)
+    // NM Price filters
     if (state.filters.minNmPrice !== null) {
       filtered = filtered.filter(card => 
         card.pricing?.nearMint >= state.filters.minNmPrice
@@ -212,7 +242,7 @@ const useStore = create((set, get) => ({
       );
     }
     
-    // Price Multiple filters (NEW)
+    // Price Multiple filters
     if (state.filters.minPriceMultiple !== null) {
       filtered = filtered.filter(card => 
         card.pricing?.priceMultiple >= state.filters.minPriceMultiple
@@ -224,7 +254,7 @@ const useStore = create((set, get) => ({
       );
     }
     
-    // Grading Score filters (NEW)
+    // Grading Score filters
     if (state.filters.minGradingScore !== null) {
       filtered = filtered.filter(card => 
         card.gradingScore?.score >= state.filters.minGradingScore
@@ -240,6 +270,14 @@ const useStore = create((set, get) => ({
     if (state.filters.missingPopulation) {
       filtered = filtered.filter(card => 
         !card.population?.total || !card.population?.psa10
+      );
+    }
+    
+    // Not found filter (cards with no pricing data)
+    if (state.filters.notFound) {
+      filtered = filtered.filter(card => 
+        card.status === 'not_found' || 
+        (!card.pricing?.nearMint && !card.pricing?.psa9 && !card.pricing?.psa10)
       );
     }
     
@@ -305,7 +343,7 @@ const useStore = create((set, get) => ({
     return filtered;
   },
   
-  // Get paginated cards (NEW)
+  // Get paginated cards
   getPaginatedCards: () => {
     const state = get();
     const filtered = state.getFilteredCards();
@@ -319,7 +357,7 @@ const useStore = create((set, get) => ({
     return filtered.slice(start, end);
   },
   
-  // Get total pages (NEW)
+  // Get total pages
   getTotalPages: () => {
     const state = get();
     const filtered = state.getFilteredCards();
@@ -348,6 +386,8 @@ const useStore = create((set, get) => ({
         totalPSA10Value: 0,
         avgPsa10Rate: 0,
         avgPriceMultiple: 0,
+        notFoundCount: 0,
+        missingPopCount: 0,
       };
     }
     
@@ -365,6 +405,17 @@ const useStore = create((set, get) => ({
       ? cardsWithMultiple.reduce((sum, c) => sum + c.pricing.priceMultiple, 0) / cardsWithMultiple.length
       : 0;
     
+    // Count cards with no pricing data (not found)
+    const notFoundCount = state.cards.filter(c => 
+      c.status === 'not_found' ||
+      (!c.pricing?.nearMint && !c.pricing?.psa9 && !c.pricing?.psa10)
+    ).length;
+    
+    // Count cards missing population data
+    const missingPopCount = state.cards.filter(c => 
+      !c.population?.total || !c.population?.psa10
+    ).length;
+    
     return {
       totalCards: cards.length,
       totalNMValue,
@@ -372,6 +423,8 @@ const useStore = create((set, get) => ({
       totalPSA10Value,
       avgPsa10Rate,
       avgPriceMultiple,
+      notFoundCount,
+      missingPopCount,
     };
   },
   
