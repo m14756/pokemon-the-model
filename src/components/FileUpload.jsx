@@ -13,6 +13,7 @@ const FileUpload = () => {
   const [file, setFile] = useState(null);
   const [parseError, setParseError] = useState(null);
   const [parsedCards, setParsedCards] = useState([]);
+  const [progressMessage, setProgressMessage] = useState('');
   
   const { 
     addCards,
@@ -169,21 +170,27 @@ const FileUpload = () => {
     
     setLoading(true);
     setUploadProgress(0);
+    setProgressMessage('Starting...');
     setError(null);
     
     try {
-      // Process and save cards to database
-      const savedCards = await processAndSaveCards(parsedCards, setUploadProgress);
+      // Process and save cards to database (client-side - no timeout!)
+      const savedCards = await processAndSaveCards(parsedCards, (percent, message) => {
+        setUploadProgress(percent);
+        if (message) setProgressMessage(message);
+      });
       
       // Transform to frontend format and add to store
       const frontendCards = dbRowsToCards(savedCards);
       addCards(frontendCards);
       
       setLoading(false);
+      setProgressMessage('');
       navigate('/collection');
     } catch (error) {
       setError(error.message);
       setLoading(false);
+      setProgressMessage('');
     }
   };
   
@@ -290,7 +297,9 @@ const FileUpload = () => {
           {isLoading && (
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-400 text-sm">Processing cards...</span>
+                <span className="text-slate-400 text-sm truncate max-w-[70%]">
+                  {progressMessage || 'Processing cards...'}
+                </span>
                 <span className="text-white text-sm font-medium">{uploadProgress}%</span>
               </div>
               <div className="h-2 bg-white/10 rounded-full overflow-hidden">
@@ -299,6 +308,9 @@ const FileUpload = () => {
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
+              <p className="text-slate-500 text-xs mt-2">
+                This may take a few minutes for large collections. Don't close this page.
+              </p>
             </div>
           )}
           
