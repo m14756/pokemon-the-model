@@ -19,12 +19,28 @@ const useStore = create((set, get) => ({
   filters: {
     set: null,
     rarity: null,
+    // NM Price filters
+    minNmPrice: null,
+    maxNmPrice: null,
+    // PSA 10 Price filters (was minPrice/maxPrice)
     minPrice: null,
     maxPrice: null,
+    // PSA 10 Rate filters
     minPsa10Rate: null,
     maxPsa10Rate: null,
+    // Price Multiple filters (NEW)
+    minPriceMultiple: null,
+    maxPriceMultiple: null,
+    // Grading Score filters (NEW)
+    minGradingScore: null,
+    maxGradingScore: null,
+    // Missing data filter
     missingPopulation: false,
   },
+  
+  // Pagination (NEW)
+  pageSize: 20, // 10, 20, 50, 100, or 'all'
+  currentPage: 1,
   
   // Selected card for detail view
   selectedCardId: null,
@@ -51,10 +67,11 @@ const useStore = create((set, get) => ({
     }
   },
   
-  setCards: (cards) => set({ cards }),
+  setCards: (cards) => set({ cards, currentPage: 1 }),
   
   addCards: (newCards) => set((state) => ({
-    cards: [...newCards, ...state.cards] // New cards at top
+    cards: [...newCards, ...state.cards], // New cards at top
+    currentPage: 1
   })),
   
   updateCard: (id, updates) => set((state) => ({
@@ -83,7 +100,7 @@ const useStore = create((set, get) => ({
     }
   },
   
-  clearCards: () => set({ cards: [], error: null }),
+  clearCards: () => set({ cards: [], error: null, currentPage: 1 }),
   
   setLoading: (isLoading) => set({ isLoading }),
   
@@ -93,7 +110,7 @@ const useStore = create((set, get) => ({
   
   clearError: () => set({ error: null }),
   
-  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchQuery: (query) => set({ searchQuery: query, currentPage: 1 }),
   
   setSortBy: (sortBy) => set({ sortBy }),
   
@@ -104,20 +121,34 @@ const useStore = create((set, get) => ({
   })),
   
   setFilter: (filterName, value) => set((state) => ({
-    filters: { ...state.filters, [filterName]: value }
+    filters: { ...state.filters, [filterName]: value },
+    currentPage: 1 // Reset to first page when filter changes
   })),
   
   clearFilters: () => set({
     filters: {
       set: null,
       rarity: null,
+      minNmPrice: null,
+      maxNmPrice: null,
       minPrice: null,
       maxPrice: null,
       minPsa10Rate: null,
       maxPsa10Rate: null,
+      minPriceMultiple: null,
+      maxPriceMultiple: null,
+      minGradingScore: null,
+      maxGradingScore: null,
       missingPopulation: false,
-    }
+    },
+    currentPage: 1
   }),
+  
+  // Pagination actions (NEW)
+  setPageSize: (size) => set({ pageSize: size, currentPage: 1 }),
+  setCurrentPage: (page) => set({ currentPage: page }),
+  nextPage: () => set((state) => ({ currentPage: state.currentPage + 1 })),
+  prevPage: () => set((state) => ({ currentPage: Math.max(1, state.currentPage - 1) })),
   
   setSelectedCardId: (id) => set({ selectedCardId: id }),
   
@@ -145,7 +176,19 @@ const useStore = create((set, get) => ({
       filtered = filtered.filter(card => card.rarity === state.filters.rarity);
     }
     
-    // Price filters
+    // NM Price filters (NEW)
+    if (state.filters.minNmPrice !== null) {
+      filtered = filtered.filter(card => 
+        card.pricing?.nearMint >= state.filters.minNmPrice
+      );
+    }
+    if (state.filters.maxNmPrice !== null) {
+      filtered = filtered.filter(card => 
+        card.pricing?.nearMint <= state.filters.maxNmPrice
+      );
+    }
+    
+    // PSA 10 Price filters (existing - was minPrice/maxPrice)
     if (state.filters.minPrice !== null) {
       filtered = filtered.filter(card => 
         card.pricing?.psa10 >= state.filters.minPrice
@@ -166,6 +209,30 @@ const useStore = create((set, get) => ({
     if (state.filters.maxPsa10Rate !== null) {
       filtered = filtered.filter(card => 
         card.population?.psa10Rate <= state.filters.maxPsa10Rate
+      );
+    }
+    
+    // Price Multiple filters (NEW)
+    if (state.filters.minPriceMultiple !== null) {
+      filtered = filtered.filter(card => 
+        card.pricing?.priceMultiple >= state.filters.minPriceMultiple
+      );
+    }
+    if (state.filters.maxPriceMultiple !== null) {
+      filtered = filtered.filter(card => 
+        card.pricing?.priceMultiple <= state.filters.maxPriceMultiple
+      );
+    }
+    
+    // Grading Score filters (NEW)
+    if (state.filters.minGradingScore !== null) {
+      filtered = filtered.filter(card => 
+        card.gradingScore?.score >= state.filters.minGradingScore
+      );
+    }
+    if (state.filters.maxGradingScore !== null) {
+      filtered = filtered.filter(card => 
+        card.gradingScore?.score <= state.filters.maxGradingScore
       );
     }
     
@@ -236,6 +303,32 @@ const useStore = create((set, get) => ({
     });
     
     return filtered;
+  },
+  
+  // Get paginated cards (NEW)
+  getPaginatedCards: () => {
+    const state = get();
+    const filtered = state.getFilteredCards();
+    
+    if (state.pageSize === 'all') {
+      return filtered;
+    }
+    
+    const start = (state.currentPage - 1) * state.pageSize;
+    const end = start + state.pageSize;
+    return filtered.slice(start, end);
+  },
+  
+  // Get total pages (NEW)
+  getTotalPages: () => {
+    const state = get();
+    const filtered = state.getFilteredCards();
+    
+    if (state.pageSize === 'all') {
+      return 1;
+    }
+    
+    return Math.ceil(filtered.length / state.pageSize);
   },
   
   getSelectedCard: () => {
