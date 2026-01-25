@@ -30,6 +30,7 @@ const CardDetail = () => {
   const [editName, setEditName] = useState('');
   const [editSet, setEditSet] = useState('');
   const [editNumber, setEditNumber] = useState('');
+  const [editPriceTrackerId, setEditPriceTrackerId] = useState('');
   const [preservePopulation, setPreservePopulation] = useState(true);
   const [isResyncing, setIsResyncing] = useState(false);
   const [resyncMessage, setResyncMessage] = useState(null);
@@ -55,6 +56,7 @@ const CardDetail = () => {
     setEditName(card?.name || '');
     setEditSet(card?.set || '');
     setEditNumber(card?.number || '');
+    setEditPriceTrackerId('');
     setPreservePopulation(true);
     setIsEditingInfo(true);
     setResyncMessage(null);
@@ -66,6 +68,7 @@ const CardDetail = () => {
     setEditName('');
     setEditSet('');
     setEditNumber('');
+    setEditPriceTrackerId('');
     setResyncMessage(null);
   };
   
@@ -81,7 +84,8 @@ const CardDetail = () => {
     
     try {
       await resyncCard(cardId, editName.trim(), editSet.trim(), editNumber.trim(), {
-        preservePopulation
+        preservePopulation,
+        priceTrackerId: editPriceTrackerId.trim() || null
       });
       
       setIsEditingInfo(false);
@@ -333,6 +337,12 @@ const CardDetail = () => {
                   <div>
                     <label className="block text-slate-400 text-xs uppercase tracking-wide mb-2">Card Number (optional)</label>
                     <input type="text" value={editNumber} onChange={(e) => setEditNumber(e.target.value)} placeholder="e.g. 183 or 183/165" className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-electric-500 focus:ring-1 focus:ring-electric-500" />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-slate-400 text-xs uppercase tracking-wide mb-2">PriceTracker ID (optional - most reliable)</label>
+                    <input type="text" value={editPriceTrackerId} onChange={(e) => setEditPriceTrackerId(e.target.value)} placeholder="e.g. 253266 (find on pokemonpricetracker.com)" className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-electric-500 focus:ring-1 focus:ring-electric-500" />
+                    <p className="text-slate-500 text-xs mt-1">Find this ID in the top-right corner of the card page on pokemonpricetracker.com</p>
                   </div>
                   
                   <div className="p-4 rounded-xl bg-white/5 border border-white/10">
