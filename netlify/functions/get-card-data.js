@@ -47,6 +47,49 @@ const cleanCardName = (name) => {
 };
 
 // ============================================
+// SEARCH BY PRICETRACKER ID (most reliable)
+// ============================================
+const searchByPriceTrackerId = async (priceTrackerId) => {
+  const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
+  
+  if (!apiKey || !priceTrackerId) {
+    return null;
+  }
+  
+  const url = `${PRICE_TRACKER_API}/cards?tcgPlayerId=${priceTrackerId}`;
+  
+  console.log(`Searching by PriceTracker ID: ${priceTrackerId}`);
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      console.error(`PriceTracker API error: ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (!data.data || data.data.length === 0) {
+      console.log(`No results for ID: ${priceTrackerId}`);
+      return null;
+    }
+    
+    console.log(`✓ Found by ID: "${data.data[0].name}"`);
+    return data.data[0];
+    
+  } catch (error) {
+    console.error(`Search by ID error: ${error.message}`);
+    return null;
+  }
+};
+
+// ============================================
 // POKEMON PRICE TRACKER API SEARCH
 // ============================================
 const searchPriceTracker = async (name, set, number) => {
@@ -166,7 +209,7 @@ export const handler = async (event) => {
   }
   
   try {
-    const { name, set, number } = JSON.parse(event.body);
+    const { name, set, number, priceTrackerId } = JSON.parse(event.body);
     
     if (!name || !set) {
       return {
@@ -176,9 +219,18 @@ export const handler = async (event) => {
       };
     }
     
-    console.log(`\n=== Processing: "${name}" | "${set}" | "${number}" ===`);
+    console.log(`\n=== Processing: "${name}" | "${set}" | "${number}" | ID: ${priceTrackerId || 'none'} ===`);
     
-    const card = await searchWithFallback(name, set, number);
+    // If PriceTracker ID provided, use it directly (most reliable)
+    let card = null;
+    if (priceTrackerId) {
+      card = await searchByPriceTrackerId(priceTrackerId);
+    }
+    
+    // Fall back to name/set search if no ID or ID not found
+    if (!card) {
+      card = await searchWithFallback(name, set, number);
+    }
     
     if (!card) {
       console.log(`✗ Not found: "${name}"`);
