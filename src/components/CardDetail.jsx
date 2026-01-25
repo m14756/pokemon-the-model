@@ -245,17 +245,30 @@ const CardDetail = () => {
               )}
             </div>
             
-            <div className="flex gap-2 mt-4">
-              {card.tcgplayerUrl && (
-                <a href={card.tcgplayerUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
+            <div className="flex flex-col gap-2 mt-4">
+              <div className="flex gap-2">
+                {card.tcgplayerUrl && (
+                  <a href={card.tcgplayerUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
+                    <ExternalLink size={16} />
+                    TCGPlayer
+                  </a>
+                )}
+                <a href="https://www.psacard.com/pop" target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
                   <ExternalLink size={16} />
-                  TCGPlayer
+                  PSA Pop
+                </a>
+              </div>
+              {card.id && !isNotFound && (
+                <a 
+                  href={`https://www.pokemonpricetracker.com/card/${card.id}`} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-secondary w-full text-sm bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 text-amber-400"
+                >
+                  <ExternalLink size={16} />
+                  View on PriceTracker
                 </a>
               )}
-              <a href="https://www.psacard.com/pop" target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">
-                <ExternalLink size={16} />
-                PSA Pop
-              </a>
             </div>
           </div>
         </div>
