@@ -65,6 +65,44 @@ const getSetVariations = (set) => {
     variations.push(set.replace(/\s*(galarian\s+)?gallery/i, '').trim());
   }
   
+  // Handle common set name variations
+  const setMappings = {
+    '151': ['151', 'Pokémon TCG: 151', 'Pokemon TCG: 151', 'Scarlet & Violet—151', 'Scarlet & Violet-151'],
+    'scarlet & violet': ['Scarlet & Violet', 'Scarlet and Violet'],
+    'sword & shield': ['Sword & Shield', 'Sword and Shield'],
+    'pokémon go': ['Pokémon GO', 'Pokemon GO', 'Pokemon Go'],
+    'pokemon go': ['Pokémon GO', 'Pokemon GO', 'Pokemon Go'],
+    'svp black star promos': ['SVP Black Star Promos', 'Scarlet & Violet Black Star Promos', 'SV Black Star Promos', 'SVP Promos'],
+    'champion\'s path': ['Champion\'s Path', 'Champions Path'],
+    'celebrations': ['Celebrations', 'Celebrations: Classic Collection'],
+    'crown zenith': ['Crown Zenith', 'Crown Zenith Galarian Gallery'],
+    'destined rivals': ['Destined Rivals'],
+    'surging sparks': ['Surging Sparks'],
+    'stellar crown': ['Stellar Crown'],
+    'twilight masquerade': ['Twilight Masquerade'],
+    'temporal forces': ['Temporal Forces'],
+    'paradox rift': ['Paradox Rift'],
+    'paldea evolved': ['Paldea Evolved'],
+    'paldean fates': ['Paldean Fates'],
+    'shrouded fable': ['Shrouded Fable'],
+    'prismatic evolutions': ['Prismatic Evolutions'],
+  };
+  
+  const lowerSet = set.toLowerCase();
+  if (setMappings[lowerSet]) {
+    variations.push(...setMappings[lowerSet]);
+  }
+  
+  // Also try with "Base" removed if present
+  if (set.toLowerCase().includes('base')) {
+    variations.push(set.replace(/\s*base\s*/i, ' ').trim());
+  }
+  
+  // Try adding/removing "Pokémon TCG:" prefix
+  if (!set.toLowerCase().startsWith('pokémon tcg') && !set.toLowerCase().startsWith('pokemon tcg')) {
+    variations.push(`Pokémon TCG: ${set}`);
+  }
+  
   return [...new Set(variations)]; // Remove duplicates
 };
 
@@ -146,11 +184,21 @@ const searchWithFallback = async (name, set, number) => {
     }
   }
   
-  // Attempt 3: Name only (last resort)
-  console.log(`Attempt 3: "${name}" only`);
+  // Attempt 3: Name + Number only (no set) - for when set name doesn't match
+  if (cleanedNumber) {
+    console.log(`Attempt 3: "${name}" + number "${cleanedNumber}" (no set)`);
+    const result = await searchPokemonTCG(name, null, cleanedNumber);
+    if (result) {
+      console.log(`✓ Found "${name}" on attempt 3 (name+number only)`);
+      return result;
+    }
+  }
+  
+  // Attempt 4: Name only (last resort)
+  console.log(`Attempt 4: "${name}" only`);
   const result = await searchPokemonTCG(name, null, null);
   if (result) {
-    console.log(`✓ Found "${name}" on attempt 3 (name only)`);
+    console.log(`✓ Found "${name}" on attempt 4 (name only)`);
     return result;
   }
   
