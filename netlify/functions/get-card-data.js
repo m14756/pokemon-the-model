@@ -56,9 +56,11 @@ const searchByPriceTrackerId = async (priceTrackerId) => {
     return null;
   }
   
-  const url = `${PRICE_TRACKER_API}/cards?tcgPlayerId=${priceTrackerId}`;
+  // Use tcgPlayerId with includeBoth for full data
+  const url = `${PRICE_TRACKER_API}/cards?tcgPlayerId=${priceTrackerId}&includeBoth=true`;
   
-  console.log(`Searching by PriceTracker ID: ${priceTrackerId}`);
+  console.log(`Searching by TCGPlayer ID: ${priceTrackerId}`);
+  console.log(`URL: ${url}`);
   
   try {
     const response = await fetch(url, {
@@ -68,12 +70,17 @@ const searchByPriceTrackerId = async (priceTrackerId) => {
       },
     });
     
+    console.log(`Response status: ${response.status}`);
+    
     if (!response.ok) {
-      console.error(`PriceTracker API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`PriceTracker API error: ${response.status} - ${errorText}`);
       return null;
     }
     
     const data = await response.json();
+    console.log(`Response data keys: ${Object.keys(data)}`);
+    console.log(`Data.data length: ${data.data?.length || 0}`);
     
     if (!data.data || data.data.length === 0) {
       console.log(`No results for ID: ${priceTrackerId}`);
@@ -81,6 +88,7 @@ const searchByPriceTrackerId = async (priceTrackerId) => {
     }
     
     console.log(`✓ Found by ID: "${data.data[0].name}"`);
+    console.log(`  All fields: ${JSON.stringify(Object.keys(data.data[0]))}`);
     console.log(`  Image fields: image=${data.data[0].image}, imageUrl=${data.data[0].imageUrl}, images=${JSON.stringify(data.data[0].images)}`);
     return data.data[0];
     
