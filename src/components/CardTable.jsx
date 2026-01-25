@@ -11,9 +11,14 @@ import {
   AlertTriangle,
   TrendingUp,
   Trash2,
-  Clock
+  ChevronLeft,
+  ChevronRight,
+  Square,
+  CheckSquare,
+  Minus
 } from 'lucide-react';
 import useStore from '../store/useStore';
+import { deleteCards as dbDeleteCards } from '../api/database';
 import { formatCurrency, formatPercent, formatMultiple, formatNumber, getPsa10RateCategory } from '../utils/helpers';
 import PSABadge from './PSABadge';
 
@@ -29,9 +34,13 @@ const SORT_OPTIONS = [
   { value: 'gradingScore', label: 'Grade Score' },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 'all'];
+
 const CardTable = () => {
   const navigate = useNavigate();
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedCards, setSelectedCards] = useState(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const {
     searchQuery,
@@ -44,14 +53,23 @@ const CardTable = () => {
     setFilter,
     clearFilters,
     getFilteredCards,
+    getPaginatedCards,
+    getTotalPages,
     getCollectionStats,
     getUniqueSets,
     setSelectedCardId,
     removeCard,
     cards,
+    setCards,
+    pageSize,
+    setPageSize,
+    currentPage,
+    setCurrentPage,
   } = useStore();
   
   const filteredCards = getFilteredCards();
+  const paginatedCards = getPaginatedCards();
+  const totalPages = getTotalPages();
   const stats = getCollectionStats();
   const sets = getUniqueSets();
   
@@ -86,9 +104,62 @@ const CardTable = () => {
   };
   
   const handleDeleteCard = async (e, card) => {
-    e.stopPropagation(); // Prevent row click
+    e.stopPropagation();
     if (window.confirm(`Delete "${card.name}" from your collection?`)) {
       await removeCard(card.id);
+      setSelectedCards(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(card.id);
+        return newSet;
+      });
+    }
+  };
+  
+  // Checkbox selection handlers
+  const handleSelectCard = (e, cardId) => {
+    e.stopPropagation();
+    setSelectedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(cardId)) {
+        newSet.delete(cardId);
+      } else {
+        newSet.add(cardId);
+      }
+      return newSet;
+    });
+  };
+  
+  const handleSelectAll = () => {
+    if (selectedCards.size === paginatedCards.length) {
+      // Deselect all
+      setSelectedCards(new Set());
+    } else {
+      // Select all visible cards
+      setSelectedCards(new Set(paginatedCards.map(c => c.id)));
+    }
+  };
+  
+  const handleDeleteSelected = async () => {
+    if (selectedCards.size === 0) return;
+    
+    const count = selectedCards.size;
+    if (!window.confirm(`Delete ${count} selected card${count > 1 ? 's' : ''}?`)) {
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      const idsToDelete = Array.from(selectedCards);
+      await dbDeleteCards(idsToDelete);
+      
+      // Update local state
+      setCards(cards.filter(c => !selectedCards.has(c.id)));
+      setSelectedCards(new Set());
+    } catch (error) {
+      console.error('Failed to delete cards:', error);
+      alert('Failed to delete some cards. Please try again.');
+    } finally {
+      setIsDeleting(false);
     }
   };
   
@@ -113,6 +184,10 @@ const CardTable = () => {
   );
   
   const hasActiveFilters = Object.values(filters).some(v => v !== null && v !== false);
+  
+  // Selection state for header checkbox
+  const allSelected = paginatedCards.length > 0 && selectedCards.size === paginatedCards.length;
+  const someSelected = selectedCards.size > 0 && selectedCards.size < paginatedCards.length;
   
   return (
     <div className="space-y-4">
@@ -209,6 +284,29 @@ const CardTable = () => {
         </div>
       </div>
       
+      {/* Mass Delete Bar */}
+      {selectedCards.size > 0 && (
+        <div className="flex items-center gap-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+          <span className="text-white text-sm">
+            <span className="font-semibold">{selectedCards.size}</span> card{selectedCards.size > 1 ? 's' : ''} selected
+          </span>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={isDeleting}
+            className="btn bg-red-500 hover:bg-red-600 text-white text-sm py-1.5 px-3"
+          >
+            <Trash2 size={16} />
+            {isDeleting ? 'Deleting...' : 'Delete Selected'}
+          </button>
+          <button
+            onClick={() => setSelectedCards(new Set())}
+            className="text-slate-400 hover:text-white text-sm"
+          >
+            Clear Selection
+          </button>
+        </div>
+      )}
+      
       {/* Filters Panel */}
       {showFilters && (
         <div className="glass rounded-xl p-4 animate-fade-in">
@@ -225,7 +323,7 @@ const CardTable = () => {
             )}
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             {/* Set Filter */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
@@ -243,7 +341,7 @@ const CardTable = () => {
               </select>
             </div>
             
-            {/* Missing Population Filter */}
+            {/* Data Status Filters */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
                 Data Status
@@ -251,31 +349,25 @@ const CardTable = () => {
               <div className="flex flex-col gap-2">
                 <button
                   onClick={() => setFilter('missingPopulation', !filters.missingPopulation)}
-                  className={`w-full px-4 py-2 rounded-xl border transition-colors flex items-center justify-center gap-2 ${
+                  className={`w-full px-3 py-1.5 rounded-lg border transition-colors flex items-center justify-center gap-2 text-sm ${
                     filters.missingPopulation 
                       ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' 
                       : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                   }`}
                 >
-                  <AlertTriangle size={16} />
-                  Missing Population
-                  {filters.missingPopulation && (
-                    <span className="ml-1">({missingPopulationCount})</span>
-                  )}
+                  <AlertTriangle size={14} />
+                  Missing Pop
                 </button>
                 <button
                   onClick={() => setFilter('notFound', !filters.notFound)}
-                  className={`w-full px-4 py-2 rounded-xl border transition-colors flex items-center justify-center gap-2 ${
+                  className={`w-full px-3 py-1.5 rounded-lg border transition-colors flex items-center justify-center gap-2 text-sm ${
                     filters.notFound 
                       ? 'bg-red-500/20 border-red-500/50 text-red-400' 
                       : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                   }`}
                 >
-                  <AlertCircle size={16} />
+                  <AlertCircle size={14} />
                   Not Found
-                  {filters.notFound && (
-                    <span className="ml-1">({notFoundCount})</span>
-                  )}
                 </button>
               </div>
             </div>
@@ -283,12 +375,12 @@ const CardTable = () => {
             {/* PSA 10 Rate Range */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                PSA 10 Rate
+                PSA 10 Rate (%)
               </label>
               <div className="flex gap-2">
                 <input
                   type="number"
-                  placeholder="Min %"
+                  placeholder="Min"
                   value={filters.minPsa10Rate || ''}
                   onChange={(e) => setFilter('minPsa10Rate', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -297,7 +389,7 @@ const CardTable = () => {
                 />
                 <input
                   type="number"
-                  placeholder="Max %"
+                  placeholder="Max"
                   value={filters.maxPsa10Rate || ''}
                   onChange={(e) => setFilter('maxPsa10Rate', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -307,15 +399,15 @@ const CardTable = () => {
               </div>
             </div>
             
-            {/* Price Range */}
+            {/* PSA 10 Price Range */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                PSA 10 Price
+                PSA 10 Price ($)
               </label>
               <div className="flex gap-2">
                 <input
                   type="number"
-                  placeholder="Min $"
+                  placeholder="Min"
                   value={filters.minPrice || ''}
                   onChange={(e) => setFilter('minPrice', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -323,7 +415,7 @@ const CardTable = () => {
                 />
                 <input
                   type="number"
-                  placeholder="Max $"
+                  placeholder="Max"
                   value={filters.maxPrice || ''}
                   onChange={(e) => setFilter('maxPrice', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -332,18 +424,139 @@ const CardTable = () => {
               </div>
             </div>
           </div>
+          
+          {/* Second row of filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* NM Price Range */}
+            <div>
+              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
+                NM Price ($)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={filters.minNmPrice || ''}
+                  onChange={(e) => setFilter('minNmPrice', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                />
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={filters.maxNmPrice || ''}
+                  onChange={(e) => setFilter('maxNmPrice', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                />
+              </div>
+            </div>
+            
+            {/* Price Multiple Range */}
+            <div>
+              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
+                Price Multiple (x)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={filters.minPriceMultiple || ''}
+                  onChange={(e) => setFilter('minPriceMultiple', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                  step="0.1"
+                />
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={filters.maxPriceMultiple || ''}
+                  onChange={(e) => setFilter('maxPriceMultiple', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+            </div>
+            
+            {/* Grading Score Range */}
+            <div>
+              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
+                Grading Score
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={filters.minGradingScore || ''}
+                  onChange={(e) => setFilter('minGradingScore', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                  max="100"
+                />
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={filters.maxGradingScore || ''}
+                  onChange={(e) => setFilter('maxGradingScore', e.target.value ? Number(e.target.value) : null)}
+                  className="input"
+                  min="0"
+                  max="100"
+                />
+              </div>
+            </div>
+            
+            {/* Page Size */}
+            <div>
+              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
+                Cards Per Page
+              </label>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="input"
+              >
+                {PAGE_SIZE_OPTIONS.map(size => (
+                  <option key={size} value={size}>
+                    {size === 'all' ? 'Show All' : size}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       )}
       
-      {/* Results count */}
-      <p className="text-slate-500 text-sm">
-        Showing {filteredCards.length} of {stats.totalCards} cards
-        {filters.missingPopulation && (
-          <span className="text-amber-400 ml-2">
-            (filtered to missing population data)
-          </span>
+      {/* Results count and pagination info */}
+      <div className="flex items-center justify-between">
+        <p className="text-slate-500 text-sm">
+          Showing {paginatedCards.length} of {filteredCards.length} cards
+          {filteredCards.length !== stats.totalCards && ` (${stats.totalCards} total)`}
+        </p>
+        
+        {/* Pagination Controls */}
+        {pageSize !== 'all' && totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <span className="text-slate-400 text-sm px-2">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
         )}
-      </p>
+      </div>
       
       {/* Table */}
       <div className="glass rounded-xl overflow-hidden">
@@ -351,6 +564,21 @@ const CardTable = () => {
           <table className="data-table">
             <thead>
               <tr>
+                {/* Checkbox column */}
+                <th className="w-10">
+                  <button
+                    onClick={handleSelectAll}
+                    className="p-1 rounded hover:bg-white/10 transition-colors"
+                  >
+                    {allSelected ? (
+                      <CheckSquare size={18} className="text-electric-400" />
+                    ) : someSelected ? (
+                      <Minus size={18} className="text-electric-400" />
+                    ) : (
+                      <Square size={18} className="text-slate-500" />
+                    )}
+                  </button>
+                </th>
                 <th className="w-16"></th>
                 <SortHeader column="name">Card</SortHeader>
                 <SortHeader column="set">Set</SortHeader>
@@ -364,12 +592,26 @@ const CardTable = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredCards.map((card) => (
+              {paginatedCards.map((card) => (
                 <tr
                   key={card.id}
                   onClick={() => handleCardClick(card)}
                   className={`${card.status === 'error' ? 'opacity-50' : ''} ${isCardNotFound(card) ? 'bg-red-500/5' : hasMissingPopulation(card) ? 'bg-amber-500/5' : ''}`}
                 >
+                  {/* Checkbox */}
+                  <td className="w-10" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => handleSelectCard(e, card.id)}
+                      className="p-1 rounded hover:bg-white/10 transition-colors"
+                    >
+                      {selectedCards.has(card.id) ? (
+                        <CheckSquare size={18} className="text-electric-400" />
+                      ) : (
+                        <Square size={18} className="text-slate-500" />
+                      )}
+                    </button>
+                  </td>
+                  
                   {/* Image */}
                   <td className="w-16">
                     <div className="relative">
@@ -385,7 +627,6 @@ const CardTable = () => {
                           <span className="text-2xl">🃏</span>
                         </div>
                       )}
-                      {/* Not found indicator badge (priority over missing population) */}
                       {isCardNotFound(card) ? (
                         <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center" title="Card not found - click to fix">
                           <AlertCircle size={10} className="text-white" />
@@ -472,6 +713,43 @@ const CardTable = () => {
         </div>
       </div>
       
+      {/* Bottom Pagination */}
+      {pageSize !== 'all' && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={() => setCurrentPage(1)}
+            disabled={currentPage === 1}
+            className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+          >
+            First
+          </button>
+          <button
+            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <span className="text-slate-400 text-sm px-4">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronRight size={18} />
+          </button>
+          <button
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+          >
+            Last
+          </button>
+        </div>
+      )}
+      
       {/* Empty State */}
       {filteredCards.length === 0 && (
         <div className="text-center py-12">
@@ -504,11 +782,11 @@ const StatCard = ({ label, value, highlight = false, warning = false, error = fa
 const GradingScoreBadge = ({ score }) => {
   let colorClass = 'bg-slate-500/20 text-slate-400';
   
-  if (score >= 90) {
+  if (score >= 80) {
     colorClass = 'bg-psa-excellent/20 text-psa-excellent';
-  } else if (score >= 70) {
+  } else if (score >= 60) {
     colorClass = 'bg-psa-good/20 text-psa-good';
-  } else if (score >= 50) {
+  } else if (score >= 40) {
     colorClass = 'bg-psa-legendary/20 text-psa-legendary';
   } else {
     colorClass = 'bg-psa-rare/20 text-psa-rare';
