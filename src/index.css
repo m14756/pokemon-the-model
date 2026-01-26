@@ -209,6 +209,19 @@ body {
   @apply w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-electric-500/50 focus:ring-2 focus:ring-electric-500/20 transition-all;
 }
 
+/* Select dropdown styles */
+select.input {
+  @apply cursor-pointer appearance-none bg-no-repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-position: right 12px center;
+  padding-right: 40px;
+}
+
+/* Fix dropdown option text color - dark text on light browser dropdown */
+select.input option {
+  @apply bg-navy-800 text-white;
+}
+
 /* Card grid responsive */
 .card-grid {
   @apply grid gap-4;
