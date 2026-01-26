@@ -2,6 +2,7 @@
 // Uses PokémonPriceTracker API - faster, has real PSA prices from eBay sales
 
 const PRICE_TRACKER_API = 'https://www.pokemonpricetracker.com/api/v2';
+const PSA_API = 'https://www.pokemonpricetracker.com/api/psa';
 
 // ============================================
 // CARD NUMBER CLEANING
@@ -44,6 +45,51 @@ const cleanCardName = (name) => {
     .trim();
   
   return cleaned;
+};
+
+// ============================================
+// FETCH PSA POPULATION DATA
+// ============================================
+const fetchPopulation = async (cardId) => {
+  const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
+  
+  if (!apiKey || !cardId) {
+    return null;
+  }
+  
+  const url = `${PSA_API}/population/${cardId}`;
+  
+  console.log(`Fetching population for card ID: ${cardId}`);
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      console.log(`Population API returned ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    console.log(`Population data: ${JSON.stringify(data)}`);
+    
+    // Extract population numbers - structure may vary
+    const pop = data.population || data.data || data;
+    
+    return {
+      total: pop.total || pop.totalGraded || null,
+      psa10: pop.psa10 || pop.gem_mint || pop['10'] || null,
+      psa9: pop.psa9 || pop.mint || pop['9'] || null,
+      psa8: pop.psa8 || pop.nm_mt || pop['8'] || null,
+    };
+  } catch (error) {
+    console.error(`Population fetch error: ${error.message}`);
+    return null;
+  }
 };
 
 // ============================================
@@ -290,8 +336,33 @@ export const handler = async (event) => {
       priceMultiple = parseFloat((psa10Price / nearMintPrice).toFixed(1));
     }
     
+    // Get card ID for population lookup
+    const cardId = card.id || card.tcgPlayerId || null;
+    
+    // Try to get population data from card response first, then fetch separately if needed
+    let populationData = {
+      total: card.population?.total || null,
+      psa10: card.population?.psa10 || null,
+      psa9: card.population?.psa9 || null,
+      psa8: card.population?.psa8 || null,
+    };
+    
+    // If no population in card response, try fetching from population endpoint
+    if (!populationData.total && cardId) {
+      const fetchedPop = await fetchPopulation(cardId);
+      if (fetchedPop) {
+        populationData = fetchedPop;
+      }
+    }
+    
+    // Calculate PSA 10 rate if we have the data
+    let psa10Rate = null;
+    if (populationData.total && populationData.psa10 && populationData.total > 0) {
+      psa10Rate = parseFloat(((populationData.psa10 / populationData.total) * 100).toFixed(2));
+    }
+    
     const cardData = {
-      id: card.id || card.tcgPlayerId || null,
+      id: cardId,
       name: card.name,
       set: card.setName || card.set || set,
       number: card.number || cleanCardNumber(number) || '',
@@ -308,16 +379,16 @@ export const handler = async (event) => {
         psa10Source: psa10Price ? 'ebay' : null,
       },
       population: {
-        total: card.population?.total || null,
-        psa10: card.population?.psa10 || null,
-        psa9: card.population?.psa9 || null,
-        psa8: card.population?.psa8 || null,
-        psa10Rate: card.population?.psa10Rate || null,
+        total: populationData.total,
+        psa10: populationData.psa10,
+        psa9: populationData.psa9,
+        psa8: populationData.psa8,
+        psa10Rate: psa10Rate,
       },
       notFound: false,
     };
     
-    console.log(`✓ Done: "${cardData.name}" | NM: $${nearMintPrice} | PSA10: $${finalPsa10} (${psa10Price ? 'real' : 'est'})`);
+    console.log(`✓ Done: "${cardData.name}" | NM: $${nearMintPrice} | PSA10: $${psa10Price || 'N/A'} | Pop: ${populationData.total || 'N/A'}`);
     
     return {
       statusCode: 200,
