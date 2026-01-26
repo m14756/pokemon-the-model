@@ -1,12 +1,47 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Loader2 } from 'lucide-react';
+import { Upload, Loader2, RefreshCw, Clock } from 'lucide-react';
 import CardTable from '../components/CardTable';
 import useStore from '../store/useStore';
 
 const CollectionPage = () => {
   const navigate = useNavigate();
-  const { cards, isLoading, isInitialized } = useStore();
+  const { cards, isLoading, isInitialized, lastSyncTime, isResyncing, resyncProgress, resyncAllCards } = useStore();
+  const [resyncResult, setResyncResult] = useState(null);
+  
+  const handleResyncAll = async () => {
+    if (isResyncing) return;
+    
+    const confirmed = window.confirm(
+      `This will refresh prices for all ${cards.length} cards.\n\nThis uses ${cards.length} API calls and may take a few minutes.\n\nContinue?`
+    );
+    
+    if (!confirmed) return;
+    
+    setResyncResult(null);
+    try {
+      const result = await resyncAllCards();
+      setResyncResult(result);
+      setTimeout(() => setResyncResult(null), 5000);
+    } catch (error) {
+      console.error('Resync failed:', error);
+    }
+  };
+  
+  const formatLastSync = (isoString) => {
+    if (!isoString) return 'Never';
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  };
   
   // Show loading while initializing from database
   if (!isInitialized || isLoading) {
@@ -61,13 +96,56 @@ const CollectionPage = () => {
             </p>
           </div>
           
-          <button
-            onClick={() => navigate('/')}
-            className="btn btn-secondary self-start"
-          >
-            <Upload size={18} />
-            New Upload
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={handleResyncAll}
+              disabled={isResyncing}
+              className="btn btn-secondary self-start"
+            >
+              <RefreshCw size={18} className={isResyncing ? 'animate-spin' : ''} />
+              {isResyncing ? 'Syncing...' : 'Refresh Prices'}
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="btn btn-secondary self-start"
+            >
+              <Upload size={18} />
+              New Upload
+            </button>
+          </div>
+        </div>
+        
+        {/* Resync Progress */}
+        {isResyncing && resyncProgress && (
+          <div className="mb-6 p-4 rounded-xl bg-electric-500/10 border border-electric-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-white font-medium">Refreshing prices...</span>
+              <span className="text-electric-400">{resyncProgress.current}/{resyncProgress.total}</span>
+            </div>
+            <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-2">
+              <div 
+                className="h-full bg-electric-500 rounded-full transition-all duration-300"
+                style={{ width: `${(resyncProgress.current / resyncProgress.total) * 100}%` }}
+              />
+            </div>
+            <p className="text-slate-400 text-sm">Processing: {resyncProgress.cardName}</p>
+          </div>
+        )}
+        
+        {/* Resync Result */}
+        {resyncResult && (
+          <div className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20">
+            <p className="text-green-400">
+              ✓ Refreshed {resyncResult.successCount} cards
+              {resyncResult.failCount > 0 && ` (${resyncResult.failCount} failed)`}
+            </p>
+          </div>
+        )}
+        
+        {/* Last Sync Time */}
+        <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
+          <Clock size={14} />
+          <span>Last price refresh: {formatLastSync(lastSyncTime)}</span>
         </div>
         
         {/* Card Table */}
