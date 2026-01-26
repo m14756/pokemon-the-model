@@ -280,18 +280,14 @@ export const handler = async (event) => {
     // Extract prices from PriceTracker response
     const nearMintPrice = card.prices?.market || card.prices?.mid || null;
     
-    // Extract real PSA prices from eBay data
+    // Extract real PSA prices from eBay data (only use real data, no estimates)
     const psa9Price = card.ebay?.psa9?.avg || card.ebay?.psa9?.lastSold || null;
     const psa10Price = card.ebay?.psa10?.avg || card.ebay?.psa10?.lastSold || null;
     
-    // If no real PSA prices, estimate from NM
-    const finalPsa9 = psa9Price || (nearMintPrice ? parseFloat((nearMintPrice * 3).toFixed(2)) : null);
-    const finalPsa10 = psa10Price || (finalPsa9 ? parseFloat((finalPsa9 * 2.5).toFixed(2)) : null);
-    
-    // Calculate price multiple
+    // Calculate price multiple only if we have real PSA 10 price
     let priceMultiple = null;
-    if (finalPsa10 && nearMintPrice && nearMintPrice > 0) {
-      priceMultiple = parseFloat((finalPsa10 / nearMintPrice).toFixed(1));
+    if (psa10Price && nearMintPrice && nearMintPrice > 0) {
+      priceMultiple = parseFloat((psa10Price / nearMintPrice).toFixed(1));
     }
     
     const cardData = {
@@ -304,12 +300,12 @@ export const handler = async (event) => {
       tcgplayerUrl: card.tcgplayerUrl || card.url || card.tcgPlayerUrl || '',
       pricing: {
         nearMint: nearMintPrice,
-        psa9: finalPsa9,
-        psa10: finalPsa10,
+        psa9: psa9Price,
+        psa10: psa10Price,
         priceMultiple: priceMultiple,
         lastUpdated: new Date().toISOString(),
-        psa9Source: psa9Price ? 'ebay' : 'estimated',
-        psa10Source: psa10Price ? 'ebay' : 'estimated',
+        psa9Source: psa9Price ? 'ebay' : null,
+        psa10Source: psa10Price ? 'ebay' : null,
       },
       population: {
         total: card.population?.total || null,
