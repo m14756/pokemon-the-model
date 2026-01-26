@@ -1,10 +1,20 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { getAllCards, deleteCard as dbDeleteCard, dbRowsToCards, resyncCard as dbResyncCard, dbRowToCard } from '../api/database';
 import { isSupabaseConfigured } from '../api/supabase';
 
-const useStore = create((set, get) => ({
+const useStore = create(
+  persist(
+    (set, get) => ({
   // Cards collection
   cards: [],
+  
+  // Last sync timestamp
+  lastSyncTime: null,
+  
+  // Resync progress
+  resyncProgress: null, // { current: 5, total: 213, cardName: 'Charizard' }
+  isResyncing: false,
   
   // UI state
   isLoading: false,
@@ -127,6 +137,65 @@ const useStore = create((set, get) => ({
       console.error('Failed to resync card:', error);
       throw error;
     }
+  },
+  
+  // Re-sync ALL cards to refresh prices
+  resyncAllCards: async () => {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase not configured');
+    }
+    
+    const { cards } = get();
+    if (cards.length === 0) return;
+    
+    set({ isResyncing: true, resyncProgress: { current: 0, total: cards.length, cardName: '' } });
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      
+      set({ 
+        resyncProgress: { 
+          current: i + 1, 
+          total: cards.length, 
+          cardName: card.name 
+        } 
+      });
+      
+      try {
+        // Re-sync with existing card info, preserving population data
+        await dbResyncCard(card.id, card.name, card.set, card.number, { 
+          preservePopulation: true,
+          priceTrackerId: null 
+        });
+        successCount++;
+      } catch (error) {
+        console.error(`Failed to resync ${card.name}:`, error);
+        failCount++;
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // Reload all cards from database to get fresh data
+    try {
+      const dbRows = await getAllCards();
+      const refreshedCards = dbRowsToCards(dbRows);
+      set({ 
+        cards: refreshedCards,
+        lastSyncTime: new Date().toISOString(),
+        isResyncing: false,
+        resyncProgress: null
+      });
+    } catch (error) {
+      console.error('Failed to reload cards:', error);
+      set({ isResyncing: false, resyncProgress: null });
+    }
+    
+    return { successCount, failCount };
   },
   
   clearCards: () => set({ cards: [], error: null, currentPage: 1 }),
@@ -437,6 +506,12 @@ const useStore = create((set, get) => ({
     const state = get();
     return [...new Set(state.cards.map(c => c.rarity).filter(Boolean))].sort();
   },
-}));
+}),
+    {
+      name: 'pokemon-tracker-storage',
+      partialize: (state) => ({ lastSyncTime: state.lastSyncTime }),
+    }
+  )
+);
 
 export default useStore;
