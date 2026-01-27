@@ -50,79 +50,29 @@ const cleanCardName = (name) => {
 // ============================================
 // FETCH PSA POPULATION DATA
 // Endpoint: GET /api/v2/population?tcgPlayerId={id}
-// Cost: 2 credits per card (premium data)
+// REQUIRES BUSINESS TIER ($99/mo) - disabled to save API calls
 // ============================================
 const fetchPopulation = async (tcgPlayerId) => {
-  const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
-  
-  if (!apiKey || !tcgPlayerId) {
-    console.log('No API key or tcgPlayerId for population fetch');
-    return null;
-  }
-  
-  const url = `${PRICE_TRACKER_API}/population?tcgPlayerId=${tcgPlayerId}`;
-  
-  console.log(`Fetching population from: ${url}`);
-  
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log(`Population API returned ${response.status}: ${errorText}`);
-      return null;
-    }
-    
-    const data = await response.json();
-    console.log(`Population response: ${JSON.stringify(data)}`);
-    
-    // Extract PSA population from response
-    const psa = data.data?.populationByGrader?.PSA;
-    
-    if (!psa) {
-      console.log('No PSA data in population response');
-      return null;
-    }
-    
-    return {
-      total: psa.totalPopulation || null,
-      psa10: psa.g10 || null,
-      psa9: psa.g9 || null,
-      psa8: psa.g8 || null,
-      psa10Rate: psa.gemRate || null,
-    };
-  } catch (error) {
-    console.error(`Population fetch error: ${error.message}`);
-    return null;
-  }
+  // Population data requires Business subscription ($99/mo)
+  // Returning null to avoid wasting API calls on 403 errors
+  return null;
 };
 
 // ============================================
-// IMPROVE IMAGE URL RESOLUTION
-// TCGPlayer URLs often have size suffix like _200x200
-// Try to get larger version
+// GET BEST IMAGE URL
+// API provides multiple sizes: imageCdnUrl200, imageCdnUrl400, imageCdnUrl800
 // ============================================
-const improveImageUrl = (url) => {
-  if (!url) return '';
-  
-  // TCGPlayer CDN: replace _in_200x200 with larger size or remove
-  if (url.includes('tcgplayer-cdn.tcgplayer.com')) {
-    // Try to get 400x400 version instead of 200x200
-    return url.replace('_in_200x200', '_in_400x400')
-              .replace('_200x200', '_400x400');
-  }
-  
-  // PokemonTCG.io: use _hires version if available
-  if (url.includes('images.pokemontcg.io') && !url.includes('_hires')) {
-    return url.replace('.png', '_hires.png').replace('.jpg', '_hires.jpg');
-  }
-  
-  return url;
+const getBestImageUrl = (card) => {
+  // Prefer highest resolution available
+  return card.imageCdnUrl800 
+    || card.imageCdnUrl400 
+    || card.imageCdnUrl200 
+    || card.imageCdnUrl
+    || card.imageUrl 
+    || card.image 
+    || card.images?.large 
+    || card.images?.small 
+    || '';
 };
 
 // ============================================
@@ -410,7 +360,7 @@ export const handler = async (event) => {
       set: card.setName || card.set || set,
       number: card.number || cleanCardNumber(number) || '',
       rarity: card.rarity || '',
-      imageUrl: improveImageUrl(card.image || card.imageUrl || card.images?.large || card.images?.small || card.img || card.cardImage || ''),
+      imageUrl: getBestImageUrl(card),
       tcgplayerUrl: card.tcgplayerUrl || card.url || card.tcgPlayerUrl || '',
       pricing: {
         nearMint: nearMintPrice,
