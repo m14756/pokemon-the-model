@@ -49,17 +49,20 @@ const cleanCardName = (name) => {
 
 // ============================================
 // FETCH PSA POPULATION DATA
+// Endpoint: GET /api/v2/population?tcgPlayerId={id}
+// Cost: 2 credits per card (premium data)
 // ============================================
-const fetchPopulation = async (cardId) => {
+const fetchPopulation = async (tcgPlayerId) => {
   const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
   
-  if (!apiKey || !cardId) {
+  if (!apiKey || !tcgPlayerId) {
+    console.log('No API key or tcgPlayerId for population fetch');
     return null;
   }
   
-  const url = `${PSA_API}/population/${cardId}`;
+  const url = `${PRICE_TRACKER_API}/population?tcgPlayerId=${tcgPlayerId}`;
   
-  console.log(`Fetching population for card ID: ${cardId}`);
+  console.log(`Fetching population from: ${url}`);
   
   try {
     const response = await fetch(url, {
@@ -70,26 +73,56 @@ const fetchPopulation = async (cardId) => {
     });
     
     if (!response.ok) {
-      console.log(`Population API returned ${response.status}`);
+      const errorText = await response.text();
+      console.log(`Population API returned ${response.status}: ${errorText}`);
       return null;
     }
     
     const data = await response.json();
-    console.log(`Population data: ${JSON.stringify(data)}`);
+    console.log(`Population response: ${JSON.stringify(data)}`);
     
-    // Extract population numbers - structure may vary
-    const pop = data.population || data.data || data;
+    // Extract PSA population from response
+    const psa = data.data?.populationByGrader?.PSA;
+    
+    if (!psa) {
+      console.log('No PSA data in population response');
+      return null;
+    }
     
     return {
-      total: pop.total || pop.totalGraded || null,
-      psa10: pop.psa10 || pop.gem_mint || pop['10'] || null,
-      psa9: pop.psa9 || pop.mint || pop['9'] || null,
-      psa8: pop.psa8 || pop.nm_mt || pop['8'] || null,
+      total: psa.totalPopulation || null,
+      psa10: psa.g10 || null,
+      psa9: psa.g9 || null,
+      psa8: psa.g8 || null,
+      psa10Rate: psa.gemRate || null,
     };
   } catch (error) {
     console.error(`Population fetch error: ${error.message}`);
     return null;
   }
+};
+
+// ============================================
+// IMPROVE IMAGE URL RESOLUTION
+// TCGPlayer URLs often have size suffix like _200x200
+// Try to get larger version
+// ============================================
+const improveImageUrl = (url) => {
+  if (!url) return '';
+  
+  // TCGPlayer CDN: replace _in_200x200 with larger size or remove
+  if (url.includes('tcgplayer-cdn.tcgplayer.com')) {
+    // Try to get 400x400 version instead of 200x200
+    return url.replace('_in_200x200', '_in_400x400')
+              .replace('_200x200', '_400x400');
+  }
+  
+  // PokemonTCG.io: use _hires version if available
+  if (url.includes('images.pokemontcg.io') && !url.includes('_hires')) {
+    return url.replace('.png', '_hires.png').replace('.jpg', '_hires.jpg');
+  }
+  
+  return url;
 };
 
 // ============================================
@@ -135,6 +168,7 @@ const searchByPriceTrackerId = async (priceTrackerId) => {
     
     console.log(`✓ Found by ID: "${data.data[0].name}"`);
     console.log(`  All fields: ${JSON.stringify(Object.keys(data.data[0]))}`);
+    console.log(`  tcgPlayerId: ${data.data[0].tcgPlayerId}`);
     console.log(`  Image fields: image=${data.data[0].image}, imageUrl=${data.data[0].imageUrl}, images=${JSON.stringify(data.data[0].images)}`);
     return data.data[0];
     
@@ -208,6 +242,8 @@ const searchPriceTracker = async (name, set, number) => {
       
       if (exactMatch) {
         console.log(`✓ Found exact match: "${exactMatch.name}" #${exactMatch.number}`);
+        console.log(`  All fields: ${JSON.stringify(Object.keys(exactMatch))}`);
+        console.log(`  tcgPlayerId: ${exactMatch.tcgPlayerId}`);
         console.log(`  Image fields: image=${exactMatch.image}, imageUrl=${exactMatch.imageUrl}, images=${JSON.stringify(exactMatch.images)}`);
         return exactMatch;
       }
@@ -215,6 +251,8 @@ const searchPriceTracker = async (name, set, number) => {
     
     // Return first result if no exact number match
     console.log(`✓ Found: "${data.data[0].name}" (first result)`);
+    console.log(`  All fields: ${JSON.stringify(Object.keys(data.data[0]))}`);
+    console.log(`  tcgPlayerId: ${data.data[0].tcgPlayerId}`);
     console.log(`  Image fields: image=${data.data[0].image}, imageUrl=${data.data[0].imageUrl}, images=${JSON.stringify(data.data[0].images)}`);
     return data.data[0];
     
@@ -336,38 +374,43 @@ export const handler = async (event) => {
       priceMultiple = parseFloat((psa10Price / nearMintPrice).toFixed(1));
     }
     
-    // Get card ID for population lookup
-    const cardId = card.id || card.tcgPlayerId || null;
+    // Get card IDs - we need tcgPlayerId for population lookup
+    const cardId = card.id || null;
+    const tcgPlayerId = card.tcgPlayerId || card.tcgplayerId || card.tcgplayer_id || null;
+    
+    console.log(`Card IDs - id: ${cardId}, tcgPlayerId: ${tcgPlayerId}`);
     
     // Try to get population data from card response first, then fetch separately if needed
     let populationData = {
-      total: card.population?.total || null,
-      psa10: card.population?.psa10 || null,
-      psa9: card.population?.psa9 || null,
-      psa8: card.population?.psa8 || null,
+      total: card.population?.total || card.population?.totalPopulation || null,
+      psa10: card.population?.psa10 || card.population?.g10 || null,
+      psa9: card.population?.psa9 || card.population?.g9 || null,
+      psa8: card.population?.psa8 || card.population?.g8 || null,
+      psa10Rate: card.population?.psa10Rate || card.population?.gemRate || null,
     };
     
-    // If no population in card response, try fetching from population endpoint
-    if (!populationData.total && cardId) {
-      const fetchedPop = await fetchPopulation(cardId);
+    // If no population in card response, try fetching from population endpoint using tcgPlayerId
+    if (!populationData.total && tcgPlayerId) {
+      const fetchedPop = await fetchPopulation(tcgPlayerId);
       if (fetchedPop) {
         populationData = fetchedPop;
       }
     }
     
-    // Calculate PSA 10 rate if we have the data
-    let psa10Rate = null;
-    if (populationData.total && populationData.psa10 && populationData.total > 0) {
+    // Calculate PSA 10 rate if we have the data but not the rate
+    let psa10Rate = populationData.psa10Rate;
+    if (!psa10Rate && populationData.total && populationData.psa10 && populationData.total > 0) {
       psa10Rate = parseFloat(((populationData.psa10 / populationData.total) * 100).toFixed(2));
     }
     
     const cardData = {
       id: cardId,
+      tcgPlayerId: tcgPlayerId,
       name: card.name,
       set: card.setName || card.set || set,
       number: card.number || cleanCardNumber(number) || '',
       rarity: card.rarity || '',
-      imageUrl: card.image || card.imageUrl || card.images?.large || card.images?.small || card.img || card.cardImage || '',
+      imageUrl: improveImageUrl(card.image || card.imageUrl || card.images?.large || card.images?.small || card.img || card.cardImage || ''),
       tcgplayerUrl: card.tcgplayerUrl || card.url || card.tcgPlayerUrl || '',
       pricing: {
         nearMint: nearMintPrice,
