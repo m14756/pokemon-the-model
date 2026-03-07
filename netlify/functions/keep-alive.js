@@ -1,9 +1,9 @@
 // Netlify serverless function to keep Supabase database active
 // Set up a free cron job at cron-job.org to hit this every 3 days
 
-import { createClient } from '@supabase/supabase-js';
+const { createClient } = require('@supabase/supabase-js');
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
   
