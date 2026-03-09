@@ -11,15 +11,17 @@ import {
   AlertTriangle,
   TrendingUp,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
-  Square,
+  RefreshCw,
   CheckSquare,
-  Minus
+  Square,
+  Loader2,
+  Edit3,
+  Save
 } from 'lucide-react';
 import useStore from '../store/useStore';
-import { deleteCards as dbDeleteCards } from '../api/database';
-import { formatCurrency, formatPercent, formatMultiple, formatNumber, getPsa10RateCategory } from '../utils/helpers';
+import { updateCard as dbUpdateCard } from '../api/database';
+import { isSupabaseConfigured } from '../api/supabase';
+import { formatCurrency, formatPercent, formatMultiple, formatNumber, getPsa10RateCategory, calculateGradingScore } from '../utils/helpers';
 import PSABadge from './PSABadge';
 
 const SORT_OPTIONS = [
@@ -40,7 +42,14 @@ const CardTable = () => {
   const navigate = useNavigate();
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCards, setSelectedCards] = useState(new Set());
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
+  const [resyncProgress, setResyncProgress] = useState({ current: 0, total: 0, cardName: '' });
+  
+  // Population editing state (modal for mobile-friendly)
+  const [editingCard, setEditingCard] = useState(null);
+  const [editPopTotal, setEditPopTotal] = useState('');
+  const [editPopPsa10, setEditPopPsa10] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
   const {
     searchQuery,
@@ -59,12 +68,14 @@ const CardTable = () => {
     getUniqueSets,
     setSelectedCardId,
     removeCard,
+    updateCard,
     cards,
-    setCards,
     pageSize,
     setPageSize,
     currentPage,
     setCurrentPage,
+    nextPage,
+    prevPage,
   } = useStore();
   
   const filteredCards = getFilteredCards();
@@ -99,6 +110,8 @@ const CardTable = () => {
   };
   
   const handleCardClick = (card) => {
+    // Don't navigate if we're editing
+    if (editingCard?.id === card.id) return;
     setSelectedCardId(card.id);
     navigate(`/card/${card.id}`);
   };
@@ -107,34 +120,25 @@ const CardTable = () => {
     e.stopPropagation();
     if (window.confirm(`Delete "${card.name}" from your collection?`)) {
       await removeCard(card.id);
-      setSelectedCards(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(card.id);
-        return newSet;
-      });
     }
   };
   
   // Checkbox selection handlers
-  const handleSelectCard = (e, cardId) => {
+  const toggleCardSelection = (e, cardId) => {
     e.stopPropagation();
-    setSelectedCards(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(cardId)) {
-        newSet.delete(cardId);
-      } else {
-        newSet.add(cardId);
-      }
-      return newSet;
-    });
+    const newSelected = new Set(selectedCards);
+    if (newSelected.has(cardId)) {
+      newSelected.delete(cardId);
+    } else {
+      newSelected.add(cardId);
+    }
+    setSelectedCards(newSelected);
   };
   
-  const handleSelectAll = () => {
+  const toggleSelectAll = () => {
     if (selectedCards.size === paginatedCards.length) {
-      // Deselect all
       setSelectedCards(new Set());
     } else {
-      // Select all visible cards
       setSelectedCards(new Set(paginatedCards.map(c => c.id)));
     }
   };
@@ -147,19 +151,159 @@ const CardTable = () => {
       return;
     }
     
-    setIsDeleting(true);
+    for (const cardId of selectedCards) {
+      await removeCard(cardId);
+    }
+    
+    setSelectedCards(new Set());
+  };
+  
+  // Resync selected cards
+  const handleResyncSelected = async () => {
+    if (selectedCards.size === 0) return;
+    
+    const count = selectedCards.size;
+    if (!window.confirm(`Resync prices for ${count} selected card${count > 1 ? 's' : ''}? This will use ${count} API calls.`)) {
+      return;
+    }
+    
+    setIsResyncing(true);
+    setResyncProgress({ current: 0, total: count, cardName: '' });
+    
+    const selectedCardsList = cards.filter(c => selectedCards.has(c.id));
+    
+    for (let i = 0; i < selectedCardsList.length; i++) {
+      const card = selectedCardsList[i];
+      setResyncProgress({ current: i + 1, total: count, cardName: card.name });
+      
+      try {
+        const response = await fetch('/.netlify/functions/get-card-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: card.name,
+            set: card.set,
+            number: card.number,
+            priceTrackerId: card.priceTrackerId
+          })
+        });
+        
+        if (response.ok) {
+          const newData = await response.json();
+          
+          // Update pricing, preserve population (manual entry)
+          updateCard(card.id, {
+            pricing: {
+              ...card.pricing,
+              nearMint: newData.pricing?.nearMint ?? card.pricing?.nearMint,
+              psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
+              psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
+              lastUpdated: new Date().toISOString(),
+            },
+            imageUrl: newData.imageUrl || card.imageUrl,
+          });
+          
+          // Also update in database
+          if (isSupabaseConfigured()) {
+            try {
+              await dbUpdateCard(card.id, {
+                price_nm: newData.pricing?.nearMint ?? card.pricing?.nearMint,
+                price_psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
+                price_psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
+                image_url: newData.imageUrl || card.imageUrl,
+              });
+            } catch (dbError) {
+              console.error('Failed to update database:', dbError);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to resync ${card.name}:`, error);
+      }
+      
+      if (i < selectedCardsList.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    }
+    
+    setIsResyncing(false);
+    setResyncProgress({ current: 0, total: 0, cardName: '' });
+    setSelectedCards(new Set());
+  };
+  
+  // Population editing modal
+  const handleStartEditPop = (e, card) => {
+    e.stopPropagation();
+    setEditingCard(card);
+    setEditPopTotal(card.population?.total?.toString() || '');
+    setEditPopPsa10(card.population?.psa10?.toString() || '');
+  };
+  
+  const handleCancelEditPop = () => {
+    setEditingCard(null);
+    setEditPopTotal('');
+    setEditPopPsa10('');
+  };
+  
+  const handleSavePopulation = async () => {
+    if (!editingCard) return;
+    
+    const popTotal = editPopTotal ? parseInt(editPopTotal, 10) : null;
+    const popPsa10 = editPopPsa10 ? parseInt(editPopPsa10, 10) : null;
+    
+    if (popTotal !== null && popPsa10 !== null && popPsa10 > popTotal) {
+      alert('PSA 10 count cannot exceed total population');
+      return;
+    }
+    
+    setIsSaving(true);
+    
     try {
-      const idsToDelete = Array.from(selectedCards);
-      await dbDeleteCards(idsToDelete);
+      const psa10Rate = (popTotal && popPsa10) ? (popPsa10 / popTotal) * 100 : null;
+      
+      // Calculate new grading score
+      const updatedCardData = {
+        ...editingCard,
+        population: {
+          ...editingCard.population,
+          total: popTotal,
+          psa10: popPsa10,
+          psa10Rate: psa10Rate ? parseFloat(psa10Rate.toFixed(2)) : null,
+        }
+      };
+      const newGradingScore = calculateGradingScore(updatedCardData);
+      
+      // Update database
+      if (isSupabaseConfigured()) {
+        await dbUpdateCard(editingCard.id, {
+          pop_total: popTotal,
+          pop_psa10: popPsa10,
+          psa10_rate: psa10Rate ? parseFloat(psa10Rate.toFixed(2)) : null,
+          grading_score: newGradingScore.score,
+          grading_recommendation: newGradingScore.recommendation,
+          grading_reasoning: newGradingScore.reasoning,
+        });
+      }
       
       // Update local state
-      setCards(cards.filter(c => !selectedCards.has(c.id)));
-      setSelectedCards(new Set());
+      updateCard(editingCard.id, {
+        population: {
+          ...editingCard.population,
+          total: popTotal,
+          psa10: popPsa10,
+          psa10Rate: psa10Rate ? parseFloat(psa10Rate.toFixed(2)) : null,
+        },
+        gradingScore: newGradingScore,
+      });
+      
+      setEditingCard(null);
+      setEditPopTotal('');
+      setEditPopPsa10('');
     } catch (error) {
-      console.error('Failed to delete cards:', error);
-      alert('Failed to delete some cards. Please try again.');
+      console.error('Failed to save population:', error);
+      alert('Failed to save population data');
     } finally {
-      setIsDeleting(false);
+      setIsSaving(false);
     }
   };
   
@@ -184,8 +328,6 @@ const CardTable = () => {
   );
   
   const hasActiveFilters = Object.values(filters).some(v => v !== null && v !== false);
-  
-  // Selection state for header checkbox
   const allSelected = paginatedCards.length > 0 && selectedCards.size === paginatedCards.length;
   const someSelected = selectedCards.size > 0 && selectedCards.size < paginatedCards.length;
   
@@ -238,7 +380,6 @@ const CardTable = () => {
       
       {/* Search and Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-3">
-        {/* Search */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
           <input
@@ -250,7 +391,6 @@ const CardTable = () => {
           />
         </div>
         
-        {/* Sort Dropdown */}
         <div className="flex gap-2">
           <select
             value={sortBy}
@@ -284,26 +424,65 @@ const CardTable = () => {
         </div>
       </div>
       
-      {/* Mass Delete Bar */}
+      {/* Bulk Selection Actions */}
       {selectedCards.size > 0 && (
-        <div className="flex items-center gap-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-          <span className="text-white text-sm">
+        <div className="flex items-center gap-4 p-3 glass rounded-xl animate-fade-in">
+          <span className="text-slate-300">
             <span className="font-semibold">{selectedCards.size}</span> card{selectedCards.size > 1 ? 's' : ''} selected
           </span>
-          <button
-            onClick={handleDeleteSelected}
-            disabled={isDeleting}
-            className="btn bg-red-500 hover:bg-red-600 text-white text-sm py-1.5 px-3"
-          >
-            <Trash2 size={16} />
-            {isDeleting ? 'Deleting...' : 'Delete Selected'}
-          </button>
-          <button
-            onClick={() => setSelectedCards(new Set())}
-            className="text-slate-400 hover:text-white text-sm"
-          >
-            Clear Selection
-          </button>
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={handleResyncSelected}
+              disabled={isResyncing}
+              className="btn btn-secondary text-sm flex items-center gap-2"
+            >
+              {isResyncing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Resyncing... ({resyncProgress.current}/{resyncProgress.total})
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={16} />
+                  Resync Selected
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleDeleteSelected}
+              disabled={isResyncing}
+              className="btn btn-secondary text-sm text-red-400 hover:text-red-300 flex items-center gap-2"
+            >
+              <Trash2 size={16} />
+              Delete Selected
+            </button>
+            <button
+              onClick={() => setSelectedCards(new Set())}
+              className="btn btn-secondary text-sm"
+            >
+              Clear Selection
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Resync Progress Bar */}
+      {isResyncing && (
+        <div className="glass rounded-xl p-4 animate-fade-in">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-slate-400">
+              Resyncing: {resyncProgress.cardName}
+            </span>
+            <span className="text-sm text-slate-400">
+              {resyncProgress.current} / {resyncProgress.total}
+            </span>
+          </div>
+          <div className="w-full bg-white/10 rounded-full h-2">
+            <div 
+              className="bg-electric-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${(resyncProgress.current / resyncProgress.total) * 100}%` }}
+            />
+          </div>
         </div>
       )}
       
@@ -323,8 +502,7 @@ const CardTable = () => {
             )}
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            {/* Set Filter */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
                 Set
@@ -341,7 +519,6 @@ const CardTable = () => {
               </select>
             </div>
             
-            {/* Data Status Filters */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
                 Data Status
@@ -349,38 +526,43 @@ const CardTable = () => {
               <div className="flex flex-col gap-2">
                 <button
                   onClick={() => setFilter('missingPopulation', !filters.missingPopulation)}
-                  className={`w-full px-3 py-1.5 rounded-lg border transition-colors flex items-center justify-center gap-2 text-sm ${
+                  className={`w-full px-4 py-2 rounded-xl border transition-colors flex items-center justify-center gap-2 ${
                     filters.missingPopulation 
                       ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' 
                       : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                   }`}
                 >
-                  <AlertTriangle size={14} />
-                  Missing Pop
+                  <AlertTriangle size={16} />
+                  Missing Population
+                  {filters.missingPopulation && (
+                    <span className="ml-1">({missingPopulationCount})</span>
+                  )}
                 </button>
                 <button
                   onClick={() => setFilter('notFound', !filters.notFound)}
-                  className={`w-full px-3 py-1.5 rounded-lg border transition-colors flex items-center justify-center gap-2 text-sm ${
+                  className={`w-full px-4 py-2 rounded-xl border transition-colors flex items-center justify-center gap-2 ${
                     filters.notFound 
                       ? 'bg-red-500/20 border-red-500/50 text-red-400' 
                       : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:border-white/20'
                   }`}
                 >
-                  <AlertCircle size={14} />
+                  <AlertCircle size={16} />
                   Not Found
+                  {filters.notFound && (
+                    <span className="ml-1">({notFoundCount})</span>
+                  )}
                 </button>
               </div>
             </div>
             
-            {/* PSA 10 Rate Range */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                PSA 10 Rate (%)
+                PSA 10 Rate
               </label>
               <div className="flex gap-2">
                 <input
                   type="number"
-                  placeholder="Min"
+                  placeholder="Min %"
                   value={filters.minPsa10Rate || ''}
                   onChange={(e) => setFilter('minPsa10Rate', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -389,7 +571,7 @@ const CardTable = () => {
                 />
                 <input
                   type="number"
-                  placeholder="Max"
+                  placeholder="Max %"
                   value={filters.maxPsa10Rate || ''}
                   onChange={(e) => setFilter('maxPsa10Rate', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -399,15 +581,14 @@ const CardTable = () => {
               </div>
             </div>
             
-            {/* PSA 10 Price Range */}
             <div>
               <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                PSA 10 Price ($)
+                PSA 10 Price
               </label>
               <div className="flex gap-2">
                 <input
                   type="number"
-                  placeholder="Min"
+                  placeholder="Min $"
                   value={filters.minPrice || ''}
                   onChange={(e) => setFilter('minPrice', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -415,7 +596,7 @@ const CardTable = () => {
                 />
                 <input
                   type="number"
-                  placeholder="Max"
+                  placeholder="Max $"
                   value={filters.maxPrice || ''}
                   onChange={(e) => setFilter('maxPrice', e.target.value ? Number(e.target.value) : null)}
                   className="input"
@@ -424,138 +605,34 @@ const CardTable = () => {
               </div>
             </div>
           </div>
-          
-          {/* Second row of filters */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* NM Price Range */}
-            <div>
-              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                NM Price ($)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  placeholder="Min"
-                  value={filters.minNmPrice || ''}
-                  onChange={(e) => setFilter('minNmPrice', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                />
-                <input
-                  type="number"
-                  placeholder="Max"
-                  value={filters.maxNmPrice || ''}
-                  onChange={(e) => setFilter('maxNmPrice', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                />
-              </div>
-            </div>
-            
-            {/* Price Multiple Range */}
-            <div>
-              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                Price Multiple (x)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  placeholder="Min"
-                  value={filters.minPriceMultiple || ''}
-                  onChange={(e) => setFilter('minPriceMultiple', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                  step="0.1"
-                />
-                <input
-                  type="number"
-                  placeholder="Max"
-                  value={filters.maxPriceMultiple || ''}
-                  onChange={(e) => setFilter('maxPriceMultiple', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-            </div>
-            
-            {/* Grading Score Range */}
-            <div>
-              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                Grading Score
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  placeholder="Min"
-                  value={filters.minGradingScore || ''}
-                  onChange={(e) => setFilter('minGradingScore', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                  max="100"
-                />
-                <input
-                  type="number"
-                  placeholder="Max"
-                  value={filters.maxGradingScore || ''}
-                  onChange={(e) => setFilter('maxGradingScore', e.target.value ? Number(e.target.value) : null)}
-                  className="input"
-                  min="0"
-                  max="100"
-                />
-              </div>
-            </div>
-            
-            {/* Page Size */}
-            <div>
-              <label className="text-xs text-slate-400 uppercase tracking-wide mb-1 block">
-                Cards Per Page
-              </label>
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                className="input"
-              >
-                {PAGE_SIZE_OPTIONS.map(size => (
-                  <option key={size} value={size}>
-                    {size === 'all' ? 'Show All' : size}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
         </div>
       )}
       
-      {/* Results count and pagination info */}
-      <div className="flex items-center justify-between">
+      {/* Results count and pagination controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <p className="text-slate-500 text-sm">
           Showing {paginatedCards.length} of {filteredCards.length} cards
-          {filteredCards.length !== stats.totalCards && ` (${stats.totalCards} total)`}
+          {filters.missingPopulation && (
+            <span className="text-amber-400 ml-2">
+              (filtered to missing population data)
+            </span>
+          )}
         </p>
         
-        {/* Pagination Controls */}
-        {pageSize !== 'all' && totalPages > 1 && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <span className="text-slate-400 text-sm px-2">
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 text-sm">Show:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="input w-20 text-sm py-1"
+          >
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <option key={size} value={size}>
+                {size === 'all' ? 'All' : size}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       
       {/* Table */}
@@ -564,16 +641,16 @@ const CardTable = () => {
           <table className="data-table">
             <thead>
               <tr>
-                {/* Checkbox column */}
                 <th className="w-10">
                   <button
-                    onClick={handleSelectAll}
+                    onClick={toggleSelectAll}
                     className="p-1 rounded hover:bg-white/10 transition-colors"
+                    title={allSelected ? 'Deselect all' : 'Select all on page'}
                   >
                     {allSelected ? (
                       <CheckSquare size={18} className="text-electric-400" />
                     ) : someSelected ? (
-                      <Minus size={18} className="text-electric-400" />
+                      <CheckSquare size={18} className="text-slate-500" />
                     ) : (
                       <Square size={18} className="text-slate-500" />
                     )}
@@ -598,10 +675,10 @@ const CardTable = () => {
                   onClick={() => handleCardClick(card)}
                   className={`${card.status === 'error' ? 'opacity-50' : ''} ${isCardNotFound(card) ? 'bg-red-500/5' : hasMissingPopulation(card) ? 'bg-amber-500/5' : ''}`}
                 >
-                  {/* Checkbox */}
+                  {/* Selection Checkbox */}
                   <td className="w-10" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={(e) => handleSelectCard(e, card.id)}
+                      onClick={(e) => toggleCardSelection(e, card.id)}
                       className="p-1 rounded hover:bg-white/10 transition-colors"
                     >
                       {selectedCards.has(card.id) ? (
@@ -667,9 +744,16 @@ const CardTable = () => {
                     {formatCurrency(card.pricing?.psa10)}
                   </td>
                   
-                  {/* PSA 10 Rate */}
-                  <td className="text-right">
-                    <PSABadge rate={card.population?.psa10Rate} />
+                  {/* PSA 10 Rate - Click to edit */}
+                  <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <div 
+                      className="flex items-center gap-1 justify-end cursor-pointer group"
+                      onClick={(e) => handleStartEditPop(e, card)}
+                      title="Click to edit population data"
+                    >
+                      <PSABadge rate={card.population?.psa10Rate} />
+                      <Edit3 size={12} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
                   </td>
                   
                   {/* Price Multiple */}
@@ -713,39 +797,25 @@ const CardTable = () => {
         </div>
       </div>
       
-      {/* Bottom Pagination */}
+      {/* Pagination Controls */}
       {pageSize !== 'all' && totalPages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <button
-            onClick={() => setCurrentPage(1)}
+            onClick={prevPage}
             disabled={currentPage === 1}
-            className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+            className="btn btn-secondary px-3 py-2 disabled:opacity-50"
           >
-            First
+            Previous
           </button>
-          <button
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
-            className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <span className="text-slate-400 text-sm px-4">
+          <span className="text-slate-400 px-4">
             Page {currentPage} of {totalPages}
           </span>
           <button
-            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+            onClick={nextPage}
             disabled={currentPage === totalPages}
-            className="p-2 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="btn btn-secondary px-3 py-2 disabled:opacity-50"
           >
-            <ChevronRight size={18} />
-          </button>
-          <button
-            onClick={() => setCurrentPage(totalPages)}
-            disabled={currentPage === totalPages}
-            className="px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-sm"
-          >
-            Last
+            Next
           </button>
         </div>
       )}
@@ -755,6 +825,87 @@ const CardTable = () => {
         <div className="text-center py-12">
           <AlertCircle className="w-12 h-12 text-slate-600 mx-auto mb-4" />
           <p className="text-slate-400">No cards match your search criteria</p>
+        </div>
+      )}
+      
+      {/* Population Edit Modal */}
+      {editingCard && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={handleCancelEditPop}>
+          <div 
+            className="bg-navy-800 rounded-2xl p-6 w-full max-w-sm shadow-xl border border-white/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-white mb-1">Edit Population Data</h3>
+            <p className="text-slate-400 text-sm mb-4">{editingCard.name}</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-slate-400 text-xs uppercase tracking-wide mb-2">
+                  Total Population
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 5000"
+                  value={editPopTotal}
+                  onChange={(e) => setEditPopTotal(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-lg placeholder-slate-500 focus:outline-none focus:border-electric-500"
+                  min="0"
+                  autoFocus
+                />
+              </div>
+              
+              <div>
+                <label className="block text-slate-400 text-xs uppercase tracking-wide mb-2">
+                  PSA 10 Count
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 3500"
+                  value={editPopPsa10}
+                  onChange={(e) => setEditPopPsa10(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-lg placeholder-slate-500 focus:outline-none focus:border-electric-500"
+                  min="0"
+                />
+              </div>
+              
+              {editPopTotal && editPopPsa10 && (
+                <div className="p-3 rounded-lg bg-electric-500/10 border border-electric-500/20">
+                  <p className="text-slate-400 text-sm">
+                    Calculated Rate:{' '}
+                    <span className="text-electric-400 font-semibold">
+                      {((parseInt(editPopPsa10, 10) / parseInt(editPopTotal, 10)) * 100).toFixed(1)}%
+                    </span>
+                  </p>
+                </div>
+              )}
+              
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleCancelEditPop}
+                  className="flex-1 px-4 py-3 rounded-xl bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSavePopulation}
+                  disabled={isSaving}
+                  className="flex-1 px-4 py-3 rounded-xl bg-electric-500 text-white hover:bg-electric-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={18} />
+                      Save
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -782,11 +933,11 @@ const StatCard = ({ label, value, highlight = false, warning = false, error = fa
 const GradingScoreBadge = ({ score }) => {
   let colorClass = 'bg-slate-500/20 text-slate-400';
   
-  if (score >= 80) {
+  if (score >= 90) {
     colorClass = 'bg-psa-excellent/20 text-psa-excellent';
-  } else if (score >= 60) {
+  } else if (score >= 70) {
     colorClass = 'bg-psa-good/20 text-psa-good';
-  } else if (score >= 40) {
+  } else if (score >= 50) {
     colorClass = 'bg-psa-legendary/20 text-psa-legendary';
   } else {
     colorClass = 'bg-psa-rare/20 text-psa-rare';
