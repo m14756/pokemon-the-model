@@ -165,9 +165,15 @@ const getPSAPricesFromTracker = async (name, set, number) => {
 
 // Extract pricing data from a PriceTracker card object
 const extractPriceTrackerData = (card) => {
+  // PSA prices are in ebay.salesByGrade.psa9/psa10
+  const ebayData = card.ebay?.salesByGrade || {};
+  
+  const psa9Data = ebayData.psa9;
+  const psa10Data = ebayData.psa10;
+  
   return {
-    psa9: card.ebay?.psa9?.avg || card.ebay?.psa9?.lastSold || null,
-    psa10: card.ebay?.psa10?.avg || card.ebay?.psa10?.lastSold || null,
+    psa9: psa9Data?.averagePrice || psa9Data?.medianPrice || psa9Data?.smartMarketPrice?.price || null,
+    psa10: psa10Data?.averagePrice || psa10Data?.medianPrice || psa10Data?.smartMarketPrice?.price || null,
     nmPrice: card.prices?.market || card.prices?.mid || card.price || null,
     priceTrackerId: card.id || card.tcgPlayerId || null,
   };
@@ -206,18 +212,31 @@ const tryParseTitleAPI = async (apiKey, name, set, number) => {
     const data = await response.json();
     console.log('Parse Title response:', JSON.stringify(data, null, 2));
     
-    // Check for matches
-    if (data.matches && data.matches.length > 0) {
-      const bestMatch = data.matches[0];
-      const confidence = bestMatch.confidence || 0;
+    // Check for matches - but be strict about matching
+    if (data.data?.matches && data.data.matches.length > 0) {
+      // Look for a match where the card name actually matches what we're looking for
+      const searchName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
       
-      // Only use if confidence is reasonable (> 70%)
-      if (confidence >= 0.7) {
-        console.log(`Parse Title matched: ${bestMatch.card?.name} (${(confidence * 100).toFixed(0)}% confidence)`);
-        return extractPriceTrackerData(bestMatch.card);
-      } else {
-        console.log(`Parse Title low confidence: ${(confidence * 100).toFixed(0)}%`);
+      for (const match of data.data.matches) {
+        const matchName = (match.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const matchScore = match.matchScore || 0;
+        
+        // Check if the card name contains our search name (or vice versa)
+        const nameMatches = matchName.includes(searchName) || searchName.includes(matchName);
+        
+        if (nameMatches && matchScore >= 0.5) {
+          console.log(`Parse Title matched: ${match.name} (${(matchScore * 100).toFixed(0)}% score)`);
+          // The match object has prices directly, not nested in .card
+          return {
+            psa9: null, // Parse Title doesn't return PSA prices
+            psa10: null,
+            nmPrice: match.prices?.market || match.prices?.low || null,
+            priceTrackerId: match.tcgPlayerId || null,
+          };
+        }
       }
+      
+      console.log(`Parse Title: No matching card name found for "${name}"`);
     }
     
     return null;
