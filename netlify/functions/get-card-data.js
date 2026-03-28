@@ -372,6 +372,9 @@ exports.handler = async (event) => {
       cardData.pricing.priceMultiple = parseFloat(
         (cardData.pricing.psa10 / cardData.pricing.nearMint).toFixed(1)
       );
+      console.log(`Price multiple calculated: ${cardData.pricing.psa10} / ${cardData.pricing.nearMint} = ${cardData.pricing.priceMultiple}x`);
+    } else {
+      console.log(`Price multiple NOT calculated - PSA10: ${cardData.pricing.psa10}, NM: ${cardData.pricing.nearMint}`);
     }
     
     // 5. Cache the result
