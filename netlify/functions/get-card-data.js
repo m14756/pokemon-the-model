@@ -124,20 +124,32 @@ const getPSAPricesFromTracker = async (name, set, number) => {
       
       // Log first card's ebay data to debug
       if (data.data && data.data.length > 0) {
+        console.log('First card:', data.data[0].name, 'number:', data.data[0].cardNumber || data.data[0].number);
         console.log('First card ebay data:', JSON.stringify(data.data[0].ebay || 'no ebay field'));
       }
       
       if (data.data && data.data.length > 0) {
-        // Try to find exact number match if multiple results
+        // Try to find exact number match - CRITICAL for variants/secrets
         let card = data.data[0];
-        if (number && data.data.length > 1) {
-          const cleanNumber = number.split('/')[0].toLowerCase();
-          const exactMatch = data.data.find(c => 
-            c.number && c.number.toLowerCase() === cleanNumber
-          );
+        
+        if (number) {
+          const cleanNumber = number.split('/')[0].toLowerCase().replace(/^0+/, '');
+          console.log(`Looking for card number: ${cleanNumber} among ${data.data.length} results`);
+          
+          const exactMatch = data.data.find(c => {
+            const cardNum = (c.cardNumber || c.number || '').split('/')[0].toLowerCase().replace(/^0+/, '');
+            return cardNum === cleanNumber;
+          });
+          
           if (exactMatch) {
-            console.log(`Found exact PriceTracker match: ${exactMatch.number}`);
+            console.log(`Found exact PriceTracker match: ${exactMatch.name} #${exactMatch.cardNumber || exactMatch.number}`);
+            console.log('Matched card ebay data:', JSON.stringify(exactMatch.ebay || 'no ebay field'));
             card = exactMatch;
+          } else {
+            console.log(`No exact number match found for #${number}, using first result`);
+            // Log available numbers for debugging
+            const availableNumbers = data.data.slice(0, 5).map(c => c.cardNumber || c.number).join(', ');
+            console.log(`Available numbers (first 5): ${availableNumbers}`);
           }
         }
         
