@@ -191,8 +191,9 @@ const CardTable = () => {
         if (response.ok) {
           const newData = await response.json();
           
-          // Update pricing, preserve population (manual entry)
+          // Update pricing, preserve population (manual entry), clear error status
           updateCard(card.id, {
+            status: 'success', // Clear any previous error status
             pricing: {
               ...card.pricing,
               nearMint: newData.pricing?.nearMint ?? card.pricing?.nearMint,
@@ -207,6 +208,7 @@ const CardTable = () => {
           if (isSupabaseConfigured()) {
             try {
               await dbUpdateCard(card.id, {
+                status: 'success', // Clear any previous error status
                 price_nm: newData.pricing?.nearMint ?? card.pricing?.nearMint,
                 price_psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
                 price_psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
