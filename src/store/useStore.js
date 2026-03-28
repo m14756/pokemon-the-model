@@ -176,10 +176,9 @@ const useStore = create(
         failCount++;
       }
       
-      // Delay to avoid rate limiting (1 second between cards)
-      // PriceTracker allows ~50 requests per 5 minutes = ~1 per 6 seconds
-      // But with caching and some cards not needing PriceTracker, 1 second should be safe
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Delay to avoid rate limiting
+      // PriceTracker allows ~50 requests per 5 minutes = 1 per 6 seconds
+      await new Promise(resolve => setTimeout(resolve, 6000));
     }
     
     // Reload all cards from database to get fresh data
