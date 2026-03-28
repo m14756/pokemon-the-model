@@ -96,7 +96,7 @@ const getPSAPricesFromTracker = async (name, set, number) => {
   }
   
   try {
-    // Search for card to get PSA prices
+    // First try: Standard search with name, set, number
     const params = new URLSearchParams({
       name: name,
       set: set,
@@ -118,45 +118,103 @@ const getPSAPricesFromTracker = async (name, set, number) => {
       }
     });
     
-    if (!response.ok) {
-      console.error(`PriceTracker API error: ${response.status}`);
-      const errorText = await response.text();
-      console.error('Error details:', errorText);
-      return { psa9: null, psa10: null, nmPrice: null };
+    if (response.ok) {
+      const data = await response.json();
+      console.log('PriceTracker response cards:', data.data?.length || 0);
+      
+      if (data.data && data.data.length > 0) {
+        // Try to find exact number match if multiple results
+        let card = data.data[0];
+        if (number && data.data.length > 1) {
+          const cleanNumber = number.split('/')[0].toLowerCase();
+          const exactMatch = data.data.find(c => 
+            c.number && c.number.toLowerCase() === cleanNumber
+          );
+          if (exactMatch) {
+            console.log(`Found exact PriceTracker match: ${exactMatch.number}`);
+            card = exactMatch;
+          }
+        }
+        
+        return extractPriceTrackerData(card);
+      }
     }
     
-    const data = await response.json();
-    console.log('PriceTracker response:', JSON.stringify(data, null, 2));
-    
-    // Extract PSA prices from eBay data (requires Standard tier)
-    if (data.data && data.data.length > 0) {
-      // Try to find exact number match if multiple results
-      let card = data.data[0];
-      if (number && data.data.length > 1) {
-        const cleanNumber = number.split('/')[0].toLowerCase();
-        const exactMatch = data.data.find(c => 
-          c.number && c.number.toLowerCase() === cleanNumber
-        );
-        if (exactMatch) {
-          console.log(`Found exact PriceTracker match: ${exactMatch.number}`);
-          card = exactMatch;
-        }
-      }
-      
-      return {
-        psa9: card.ebay?.psa9?.avg || card.ebay?.psa9?.lastSold || null,
-        psa10: card.ebay?.psa10?.avg || card.ebay?.psa10?.lastSold || null,
-        // Also grab NM price from PriceTracker as backup
-        nmPrice: card.prices?.market || card.prices?.mid || card.price || null,
-        // Store the PriceTracker ID for future syncs
-        priceTrackerId: card.id || null,
-      };
+    // Second try: Parse Title API (fuzzy matching fallback)
+    console.log('Standard search failed, trying Parse Title API...');
+    const parseResult = await tryParseTitleAPI(apiKey, name, set, number);
+    if (parseResult) {
+      return parseResult;
     }
     
     return { psa9: null, psa10: null, nmPrice: null };
   } catch (error) {
     console.error('Error fetching PSA prices:', error);
     return { psa9: null, psa10: null, nmPrice: null };
+  }
+};
+
+// Extract pricing data from a PriceTracker card object
+const extractPriceTrackerData = (card) => {
+  return {
+    psa9: card.ebay?.psa9?.avg || card.ebay?.psa9?.lastSold || null,
+    psa10: card.ebay?.psa10?.avg || card.ebay?.psa10?.lastSold || null,
+    nmPrice: card.prices?.market || card.prices?.mid || card.price || null,
+    priceTrackerId: card.id || card.tcgPlayerId || null,
+  };
+};
+
+// Fallback: Use Parse Title API for fuzzy matching
+const tryParseTitleAPI = async (apiKey, name, set, number) => {
+  try {
+    // Build a title string like eBay listing
+    let title = name;
+    if (set) title += ` ${set}`;
+    if (number) title += ` #${number}`;
+    
+    console.log('Parse Title API query:', title);
+    
+    const response = await fetch(`${PRICE_TRACKER_API}/parse-title`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: title,
+        options: {
+          includeEbay: true,
+          maxSuggestions: 3
+        }
+      })
+    });
+    
+    if (!response.ok) {
+      console.log('Parse Title API failed:', response.status);
+      return null;
+    }
+    
+    const data = await response.json();
+    console.log('Parse Title response:', JSON.stringify(data, null, 2));
+    
+    // Check for matches
+    if (data.matches && data.matches.length > 0) {
+      const bestMatch = data.matches[0];
+      const confidence = bestMatch.confidence || 0;
+      
+      // Only use if confidence is reasonable (> 70%)
+      if (confidence >= 0.7) {
+        console.log(`Parse Title matched: ${bestMatch.card?.name} (${(confidence * 100).toFixed(0)}% confidence)`);
+        return extractPriceTrackerData(bestMatch.card);
+      } else {
+        console.log(`Parse Title low confidence: ${(confidence * 100).toFixed(0)}%`);
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Parse Title API error:', error);
+    return null;
   }
 };
 
