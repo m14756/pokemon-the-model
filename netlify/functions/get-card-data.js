@@ -9,7 +9,12 @@ const PRICE_TRACKER_API = 'https://www.pokemonpricetracker.com/api/v2';
 const cache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-const getCacheKey = (name, set) => `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}-${set.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+const getCacheKey = (name, set, number) => {
+  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanSet = set.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanNum = (number || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return `${cleanName}-${cleanSet}-${cleanNum}`;
+};
 
 const getFromCache = (key) => {
   const cached = cache.get(key);
@@ -35,10 +40,12 @@ const searchPokemonTCG = async (name, set, number) => {
     query += ` set.name:"${set}"`;
   }
   if (number) {
+    // Handle TG numbers and regular numbers
+    const cleanNumber = number.replace(/^TG/i, '').split('/')[0];
     query += ` number:"${number.split('/')[0]}"`;
   }
   
-  const url = `${POKEMON_TCG_API}/cards?q=${encodeURIComponent(query)}&pageSize=5`;
+  const url = `${POKEMON_TCG_API}/cards?q=${encodeURIComponent(query)}&pageSize=10`;
   console.log('Searching PokémonTCG.io:', url);
   
   const headers = { 'Content-Type': 'application/json' };
@@ -61,19 +68,31 @@ const searchPokemonTCG = async (name, set, number) => {
   }
   
   console.log(`Found ${data.data.length} results from PokémonTCG.io`);
+  
+  // If we have a number, try to find exact match
+  if (number && data.data.length > 1) {
+    const exactMatch = data.data.find(card => 
+      card.number.toLowerCase() === number.toLowerCase().split('/')[0]
+    );
+    if (exactMatch) {
+      console.log(`Found exact number match: ${exactMatch.number}`);
+      return exactMatch;
+    }
+  }
+  
   return data.data[0];
 };
 
 // ============================================
 // POKEMON PRICE TRACKER API - PSA prices
 // ============================================
-const getPSAPricesFromTracker = async (name, set) => {
+const getPSAPricesFromTracker = async (name, set, number) => {
   const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
   
   // If no API key, return null
   if (!apiKey) {
     console.log('No PokemonPriceTracker API key configured');
-    return { psa9: null, psa10: null };
+    return { psa9: null, psa10: null, nmPrice: null };
   }
   
   try {
@@ -83,6 +102,11 @@ const getPSAPricesFromTracker = async (name, set) => {
       set: set,
       includeEbay: 'true', // Request PSA prices (requires Standard tier)
     });
+    
+    // Add number if available for better matching
+    if (number) {
+      params.append('number', number.split('/')[0]);
+    }
     
     const url = `${PRICE_TRACKER_API}/cards?${params.toString()}`;
     console.log('Fetching PSA prices from PriceTracker:', url);
@@ -96,7 +120,9 @@ const getPSAPricesFromTracker = async (name, set) => {
     
     if (!response.ok) {
       console.error(`PriceTracker API error: ${response.status}`);
-      return { psa9: null, psa10: null };
+      const errorText = await response.text();
+      console.error('Error details:', errorText);
+      return { psa9: null, psa10: null, nmPrice: null };
     }
     
     const data = await response.json();
@@ -104,17 +130,33 @@ const getPSAPricesFromTracker = async (name, set) => {
     
     // Extract PSA prices from eBay data (requires Standard tier)
     if (data.data && data.data.length > 0) {
-      const card = data.data[0];
+      // Try to find exact number match if multiple results
+      let card = data.data[0];
+      if (number && data.data.length > 1) {
+        const cleanNumber = number.split('/')[0].toLowerCase();
+        const exactMatch = data.data.find(c => 
+          c.number && c.number.toLowerCase() === cleanNumber
+        );
+        if (exactMatch) {
+          console.log(`Found exact PriceTracker match: ${exactMatch.number}`);
+          card = exactMatch;
+        }
+      }
+      
       return {
         psa9: card.ebay?.psa9?.avg || card.ebay?.psa9?.lastSold || null,
         psa10: card.ebay?.psa10?.avg || card.ebay?.psa10?.lastSold || null,
+        // Also grab NM price from PriceTracker as backup
+        nmPrice: card.prices?.market || card.prices?.mid || card.price || null,
+        // Store the PriceTracker ID for future syncs
+        priceTrackerId: card.id || null,
       };
     }
     
-    return { psa9: null, psa10: null };
+    return { psa9: null, psa10: null, nmPrice: null };
   } catch (error) {
     console.error('Error fetching PSA prices:', error);
-    return { psa9: null, psa10: null };
+    return { psa9: null, psa10: null, nmPrice: null };
   }
 };
 
@@ -152,11 +194,11 @@ exports.handler = async (event) => {
       };
     }
     
-    // Check cache first
-    const cacheKey = getCacheKey(name, set);
+    // Check cache first (now includes number in cache key)
+    const cacheKey = getCacheKey(name, set, number);
     const cached = getFromCache(cacheKey);
     if (cached) {
-      console.log('Returning cached data for:', name);
+      console.log('Returning cached data for:', name, number);
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -170,7 +212,7 @@ exports.handler = async (event) => {
     if (!tcgCard) {
       return {
         statusCode: 404,
-        body: JSON.stringify({ error: 'Card not found', name, set }),
+        body: JSON.stringify({ error: 'Card not found', name, set, number }),
       };
     }
     
@@ -186,16 +228,19 @@ exports.handler = async (event) => {
                       null;
     }
     
-    // 2. Try to fetch real PSA prices from PokemonPriceTracker (requires Standard tier)
-    const psaPrices = await getPSAPricesFromTracker(name, set);
+    // 2. Fetch PSA prices from PokemonPriceTracker (pass number for exact match)
+    const priceTrackerData = await getPSAPricesFromTracker(name, set, tcgCard.number || number);
     
-    // PSA prices - null if not available (no fake estimates)
-    const psa9Price = psaPrices.psa9;
-    const psa10Price = psaPrices.psa10;
+    // Use PriceTracker NM price as fallback if TCG.io didn't have one
+    if (!nearMintPrice && priceTrackerData.nmPrice) {
+      nearMintPrice = priceTrackerData.nmPrice;
+      console.log('Using PriceTracker NM price as fallback:', nearMintPrice);
+    }
     
     // 3. Build response
     const cardData = {
       id: tcgCard.id,
+      priceTrackerId: priceTrackerData.priceTrackerId || null,
       name: tcgCard.name,
       set: tcgCard.set?.name || set,
       number: tcgCard.number || number || '',
@@ -204,14 +249,14 @@ exports.handler = async (event) => {
       tcgplayerUrl: tcgCard.tcgplayer?.url || '',
       pricing: {
         nearMint: nearMintPrice,
-        psa9: psa9Price,
-        psa10: psa10Price,
+        psa9: priceTrackerData.psa9,
+        psa10: priceTrackerData.psa10,
         priceMultiple: null,
         lastUpdated: new Date().toISOString(),
         // Track data source
         nmSource: nearMintPrice ? 'api' : null,
-        psa9Source: psa9Price ? 'api' : null,
-        psa10Source: psa10Price ? 'api' : null,
+        psa9Source: priceTrackerData.psa9 ? 'api' : null,
+        psa10Source: priceTrackerData.psa10 ? 'api' : null,
       },
       population: {
         total: null,
