@@ -122,6 +122,11 @@ const getPSAPricesFromTracker = async (name, set, number) => {
       const data = await response.json();
       console.log('PriceTracker response cards:', data.data?.length || 0);
       
+      // Log first card's ebay data to debug
+      if (data.data && data.data.length > 0) {
+        console.log('First card ebay data:', JSON.stringify(data.data[0].ebay || 'no ebay field'));
+      }
+      
       if (data.data && data.data.length > 0) {
         // Try to find exact number match if multiple results
         let card = data.data[0];
@@ -142,6 +147,10 @@ const getPSAPricesFromTracker = async (name, set, number) => {
     
     // Second try: Parse Title API (fuzzy matching fallback)
     console.log('Standard search failed, trying Parse Title API...');
+    console.log('PriceTracker response status:', response.status);
+    const errorText = await response.text().catch(() => 'Could not read response');
+    console.log('PriceTracker error response:', errorText.substring(0, 200));
+    
     const parseResult = await tryParseTitleAPI(apiKey, name, set, number);
     if (parseResult) {
       return parseResult;
