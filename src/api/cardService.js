@@ -1,4 +1,5 @@
 // API configuration
+// Force rebuild v2 - 2026-03-29
 const API_BASE = '/.netlify/functions';
 
 // Set to false to use real APIs (PokémonTCG.io + PokemonPriceTracker + PSA scraping)
