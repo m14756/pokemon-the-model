@@ -365,21 +365,23 @@ exports.handler = async (event) => {
       };
     }
     
-    // Check cache first (unless skipCache is true)
-    const cacheKey = getCacheKey(name, set, number);
-    if (!skipCache) {
-      const cached = getFromCache(cacheKey);
-      if (cached) {
-        console.log('Returning cached data for:', name, number);
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cached),
-        };
-      }
-    } else {
-      console.log('Skipping cache for:', name, number);
-    }
+    // Cache disabled - always fetch fresh data
+    // const cacheKey = getCacheKey(name, set, number);
+    // if (!skipCache) {
+    //   const cached = getFromCache(cacheKey);
+    //   if (cached) {
+    //     console.log('Returning cached data for:', name, number);
+    //     return {
+    //       statusCode: 200,
+    //       headers: { 'Content-Type': 'application/json' },
+    //       body: JSON.stringify(cached),
+    //     };
+    //   }
+    // } else {
+    //   console.log('Skipping cache for:', name, number);
+    // }
+    
+    console.log('Fetching fresh data for:', name, number);
     
     // 1. Fetch from PokémonTCG.io (card info + NM price + image)
     const tcgCard = await searchPokemonTCG(name, set, number);
