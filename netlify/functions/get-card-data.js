@@ -86,6 +86,17 @@ const searchPokemonTCG = async (name, set, number) => {
 // ============================================
 // POKEMON PRICE TRACKER API - PSA prices
 // ============================================
+
+// Clean set name for PriceTracker (they use simpler names)
+const cleanSetNameForPriceTracker = (setName) => {
+  return setName
+    .replace(/ Trainer Gallery$/i, '')
+    .replace(/ Galarian Gallery$/i, '')
+    .replace(/: Galarian Gallery$/i, '')
+    .replace(/: Classic Collection$/i, '')
+    .trim();
+};
+
 const getPSAPricesFromTracker = async (name, set, number) => {
   const apiKey = process.env.POKEMON_PRICE_TRACKER_API_KEY;
   
@@ -95,11 +106,14 @@ const getPSAPricesFromTracker = async (name, set, number) => {
     return { psa9: null, psa10: null, nmPrice: null };
   }
   
+  // Clean up set name for PriceTracker
+  const cleanedSet = cleanSetNameForPriceTracker(set);
+  
   try {
     // First try: Standard search with name, set, number
     const params = new URLSearchParams({
       name: name,
-      set: set,
+      set: cleanedSet,
       includeEbay: 'true', // Request PSA prices (requires Standard tier)
     });
     
@@ -194,9 +208,12 @@ const extractPriceTrackerData = (card) => {
 // Fallback: Use Parse Title API for fuzzy matching
 const tryParseTitleAPI = async (apiKey, name, set, number) => {
   try {
+    // Clean the set name for better matching
+    const cleanedSet = cleanSetNameForPriceTracker(set);
+    
     // Build a title string like eBay listing
     let title = name;
-    if (set) title += ` ${set}`;
+    if (cleanedSet) title += ` ${cleanedSet}`;
     if (number) title += ` #${number}`;
     
     console.log('Parse Title API query:', title);
