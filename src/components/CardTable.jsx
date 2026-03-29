@@ -19,7 +19,7 @@ import {
   Save
 } from 'lucide-react';
 import useStore from '../store/useStore';
-import { updateCard as dbUpdateCard } from '../api/database';
+import { updateCard as dbUpdateCard, resyncCard as dbResyncCard } from '../api/database';
 import { isSupabaseConfigured } from '../api/supabase';
 import { formatCurrency, formatPercent, formatMultiple, formatNumber, getPsa10RateCategory, calculateGradingScore } from '../utils/helpers';
 import PSABadge from './PSABadge';
@@ -162,6 +162,11 @@ const CardTable = () => {
   const handleResyncSelected = async () => {
     if (selectedCards.size === 0) return;
     
+    if (!isSupabaseConfigured()) {
+      alert('Database not configured');
+      return;
+    }
+    
     const count = selectedCards.size;
     if (!window.confirm(`Resync prices for ${count} selected card${count > 1 ? 's' : ''}? This will use ${count} API calls.`)) {
       return;
@@ -177,54 +182,34 @@ const CardTable = () => {
       setResyncProgress({ current: i + 1, total: count, cardName: card.name });
       
       try {
-        const response = await fetch('/.netlify/functions/get-card-data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: card.name,
-            set: card.set,
-            number: card.number,
-            priceTrackerId: card.priceTrackerId
-          })
+        // Use the same resyncCard function as the card detail page
+        const updatedDbRow = await dbResyncCard(card.id, card.name, card.set, card.number, {
+          preservePopulation: true,
+          priceTrackerId: card.priceTrackerId || null
         });
         
-        if (response.ok) {
-          const newData = await response.json();
-          
-          // Update pricing, preserve population (manual entry), clear error status
-          updateCard(card.id, {
-            status: 'success', // Clear any previous error status
-            pricing: {
-              ...card.pricing,
-              nearMint: newData.pricing?.nearMint ?? card.pricing?.nearMint,
-              psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
-              psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
-              priceMultiple: newData.pricing?.priceMultiple ?? card.pricing?.priceMultiple,
-              lastUpdated: new Date().toISOString(),
-            },
-            imageUrl: newData.imageUrl || card.imageUrl,
-          });
-          
-          // Also update in database
-          if (isSupabaseConfigured()) {
-            try {
-              await dbUpdateCard(card.id, {
-                status: 'success', // Clear any previous error status
-                price_nm: newData.pricing?.nearMint ?? card.pricing?.nearMint,
-                price_psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
-                price_psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
-                price_multiple: newData.pricing?.priceMultiple ?? card.pricing?.priceMultiple,
-                image_url: newData.imageUrl || card.imageUrl,
-              });
-            } catch (dbError) {
-              console.error('Failed to update database:', dbError);
-            }
-          }
-        }
+        // Update local state with the returned data
+        updateCard(card.id, {
+          status: 'success',
+          pricing: {
+            nearMint: updatedDbRow.price_nm,
+            psa9: updatedDbRow.price_psa9,
+            psa10: updatedDbRow.price_psa10,
+            priceMultiple: updatedDbRow.price_multiple,
+            lastUpdated: updatedDbRow.updated_at,
+          },
+          imageUrl: updatedDbRow.image_url || card.imageUrl,
+          gradingScore: {
+            score: updatedDbRow.grading_score,
+            recommendation: updatedDbRow.grading_recommendation,
+            reasoning: updatedDbRow.grading_reasoning,
+          },
+        });
       } catch (error) {
         console.error(`Failed to resync ${card.name}:`, error);
       }
       
+      // Small delay between cards to avoid rate limiting
       if (i < selectedCardsList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 150));
       }
