@@ -1,6 +1,7 @@
 // Netlify serverless function to fetch card data from multiple sources
 // - PokémonTCG.io for card info, images, and NM prices (FREE)
 // - PokemonPriceTracker for PSA 9/10 prices (Standard tier $9.99/mo)
+// Cache cleared: v2 - 2024-03-29
 
 const POKEMON_TCG_API = 'https://api.pokemontcg.io/v2';
 const PRICE_TRACKER_API = 'https://www.pokemonpricetracker.com/api/v2';
@@ -341,18 +342,20 @@ exports.handler = async (event) => {
   }
   
   try {
-    let name, set, number;
+    let name, set, number, skipCache;
     
     if (event.httpMethod === 'POST') {
       const body = JSON.parse(event.body);
       name = body.name;
       set = body.set;
       number = body.number;
+      skipCache = body.skipCache || false;
     } else {
       // GET request - parse query params
       name = event.queryStringParameters?.name;
       set = event.queryStringParameters?.set;
       number = event.queryStringParameters?.number;
+      skipCache = event.queryStringParameters?.skipCache === 'true';
     }
     
     if (!name || !set) {
@@ -362,16 +365,20 @@ exports.handler = async (event) => {
       };
     }
     
-    // Check cache first (now includes number in cache key)
+    // Check cache first (unless skipCache is true)
     const cacheKey = getCacheKey(name, set, number);
-    const cached = getFromCache(cacheKey);
-    if (cached) {
-      console.log('Returning cached data for:', name, number);
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cached),
-      };
+    if (!skipCache) {
+      const cached = getFromCache(cacheKey);
+      if (cached) {
+        console.log('Returning cached data for:', name, number);
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cached),
+        };
+      }
+    } else {
+      console.log('Skipping cache for:', name, number);
     }
     
     // 1. Fetch from PokémonTCG.io (card info + NM price + image)
