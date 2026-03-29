@@ -456,8 +456,8 @@ exports.handler = async (event) => {
       console.log(`Price multiple NOT calculated - PSA10: ${cardData.pricing.psa10}, NM: ${cardData.pricing.nearMint}`);
     }
     
-    // 5. Cache the result
-    setCache(cacheKey, cardData);
+    // 5. Cache disabled
+    // setCache(cacheKey, cardData);
     
     return {
       statusCode: 200,
