@@ -277,6 +277,13 @@ export const resyncCard = async (id, name, set, number, options = { preservePopu
     priceTrackerId: options.priceTrackerId 
   });
   
+  // Debug: log what we received
+  console.log('Received enrichedData from API:', {
+    name: enrichedData.name,
+    pricing: enrichedData.pricing,
+    priceMultiple: enrichedData.pricing?.priceMultiple,
+  });
+  
   // Check if card was found
   if (enrichedData.notFound) {
     throw new Error('Card not found in API. Try adjusting the name or set.');
@@ -318,6 +325,9 @@ export const resyncCard = async (id, name, set, number, options = { preservePopu
     status: 'success',
     error_message: null,
   };
+  
+  // Debug: log what we're saving
+  console.log('Saving to Supabase - price_multiple:', updates.price_multiple);
 
   // Preserve or overwrite population based on option
   if (!options.preservePopulation) {
