@@ -87,14 +87,52 @@ const searchPokemonTCG = async (name, set, number) => {
 // POKEMON PRICE TRACKER API - PSA prices
 // ============================================
 
-// Clean set name for PriceTracker (they use simpler names)
+// Map set names to PriceTracker's exact set names
+// PriceTracker uses different names for subsets (Trainer Gallery, Galarian Gallery, Classic Collection)
+const SET_NAME_MAPPINGS = {
+  // Galarian Gallery cards are in a separate set
+  'crown zenith galarian gallery': 'Crown Zenith: Galarian Gallery',
+  'crown zenith: galarian gallery': 'Crown Zenith: Galarian Gallery',
+  // Trainer Gallery subsets
+  'silver tempest trainer gallery': 'Silver Tempest: Trainer Gallery',
+  'lost origin trainer gallery': 'Lost Origin: Trainer Gallery',
+  'astral radiance trainer gallery': 'Astral Radiance: Trainer Gallery',
+  'brilliant stars trainer gallery': 'Brilliant Stars: Trainer Gallery',
+  // Celebrations Classic Collection
+  'celebrations classic collection': 'Celebrations: Classic Collection',
+  'celebrations: classic collection': 'Celebrations: Classic Collection',
+};
+
+// Clean and map set name for PriceTracker
 const cleanSetNameForPriceTracker = (setName) => {
-  return setName
-    .replace(/ Trainer Gallery$/i, '')
-    .replace(/ Galarian Gallery$/i, '')
-    .replace(/: Galarian Gallery$/i, '')
-    .replace(/: Classic Collection$/i, '')
-    .trim();
+  if (!setName) return '';
+  
+  const lowerSet = setName.toLowerCase().trim();
+  
+  // Check for exact mapping first
+  if (SET_NAME_MAPPINGS[lowerSet]) {
+    return SET_NAME_MAPPINGS[lowerSet];
+  }
+  
+  // For subsets, keep the full name (PriceTracker has them as separate sets)
+  // e.g., "Crown Zenith Galarian Gallery" should stay as "Crown Zenith: Galarian Gallery"
+  if (lowerSet.includes('galarian gallery')) {
+    const baseName = setName.replace(/[:\s]*galarian gallery/i, '').trim();
+    return `${baseName}: Galarian Gallery`;
+  }
+  
+  if (lowerSet.includes('trainer gallery')) {
+    const baseName = setName.replace(/[:\s]*trainer gallery/i, '').trim();
+    return `${baseName}: Trainer Gallery`;
+  }
+  
+  if (lowerSet.includes('classic collection')) {
+    const baseName = setName.replace(/[:\s]*classic collection/i, '').trim();
+    return `${baseName}: Classic Collection`;
+  }
+  
+  // Return original if no special handling needed
+  return setName.trim();
 };
 
 const getPSAPricesFromTracker = async (name, set, number) => {
@@ -110,20 +148,32 @@ const getPSAPricesFromTracker = async (name, set, number) => {
   const cleanedSet = cleanSetNameForPriceTracker(set);
   
   try {
-    // First try: Standard search with name, set, number
-    const params = new URLSearchParams({
-      name: name,
-      set: cleanedSet,
-      includeEbay: 'true', // Request PSA prices (requires Standard tier)
-    });
+    // Build search query per API docs:
+    // search=charizard base set  (name + set)
+    // search=pikachu 4/102       (name + card number)
+    // search=umbreon ex unseen forces  (name + set)
+    // 
+    // Combine: "Glaceon VSTAR Crown Zenith GG40" or "Umbreon VMAX 215/203 Evolving Skies"
+    const cleanNumber = number ? number.split('/')[0] : '';
     
-    // Add number if available for better matching
-    if (number) {
-      params.append('number', number.split('/')[0]);
+    // Format: "CardName SetName CardNumber"
+    let searchQuery = name;
+    if (cleanedSet) {
+      searchQuery += ` ${cleanedSet}`;
     }
+    if (cleanNumber) {
+      searchQuery += ` ${cleanNumber}`;
+    }
+    
+    const params = new URLSearchParams({
+      search: searchQuery,
+      includeEbay: 'true', // Include PSA/CGC/BGS sales data
+      limit: '10', // We only need the top matches
+    });
     
     const url = `${PRICE_TRACKER_API}/cards?${params.toString()}`;
     console.log('Fetching PSA prices from PriceTracker:', url);
+    console.log('Search query:', searchQuery);
     
     const response = await fetch(url, {
       headers: {
@@ -136,46 +186,49 @@ const getPSAPricesFromTracker = async (name, set, number) => {
       const data = await response.json();
       console.log('PriceTracker response cards:', data.data?.length || 0);
       
-      // Log first card's ebay data to debug
+      // Log first card to debug
       if (data.data && data.data.length > 0) {
-        console.log('First card:', data.data[0].name, 'number:', data.data[0].cardNumber || data.data[0].number);
+        console.log('First card:', data.data[0].name, 'set:', data.data[0].setName, 'number:', data.data[0].cardNumber || data.data[0].number);
         console.log('First card ebay data:', JSON.stringify(data.data[0].ebay || 'no ebay field'));
       }
       
       if (data.data && data.data.length > 0) {
-        // Try to find exact number match - CRITICAL for variants/secrets
+        // With the precise search query, the first result should be our card
+        // But verify by checking card number if provided
         let card = data.data[0];
         
-        if (number) {
+        if (number && data.data.length > 1) {
           const cleanNumber = number.split('/')[0].toLowerCase().replace(/^0+/, '');
-          console.log(`Looking for card number: ${cleanNumber} among ${data.data.length} results`);
+          console.log(`Verifying card number: ${cleanNumber}`);
           
+          // Find exact number match
           const exactMatch = data.data.find(c => {
             const cardNum = (c.cardNumber || c.number || '').split('/')[0].toLowerCase().replace(/^0+/, '');
             return cardNum === cleanNumber;
           });
           
           if (exactMatch) {
-            console.log(`Found exact PriceTracker match: ${exactMatch.name} #${exactMatch.cardNumber || exactMatch.number}`);
-            console.log('Matched card ebay data:', JSON.stringify(exactMatch.ebay || 'no ebay field'));
             card = exactMatch;
+            console.log(`Verified exact match: ${card.name} #${card.cardNumber || card.number}`);
           } else {
-            console.log(`No exact number match found for #${number}, using first result`);
-            // Log available numbers for debugging
-            const availableNumbers = data.data.slice(0, 5).map(c => c.cardNumber || c.number).join(', ');
-            console.log(`Available numbers (first 5): ${availableNumbers}`);
+            console.log(`Warning: No exact number match found, using first result`);
           }
         }
         
+        console.log(`Using card: ${card.name} #${card.cardNumber || card.number} from ${card.setName}`);
         return extractPriceTrackerData(card);
       }
+    } else if (response.status === 429) {
+      console.warn('PriceTracker rate limited (429)');
+      return { psa9: null, psa10: null, nmPrice: null, rateLimited: true };
+    } else {
+      console.warn(`PriceTracker search failed: ${response.status}`);
+      const errorText = await response.text().catch(() => 'Could not read response');
+      console.log('PriceTracker error response:', errorText.substring(0, 200));
     }
     
-    // Second try: Parse Title API (fuzzy matching fallback)
+    // Fallback: Parse Title API (fuzzy matching)
     console.log('Standard search failed, trying Parse Title API...');
-    console.log('PriceTracker response status:', response.status);
-    const errorText = await response.text().catch(() => 'Could not read response');
-    console.log('PriceTracker error response:', errorText.substring(0, 200));
     
     const parseResult = await tryParseTitleAPI(apiKey, name, set, number);
     if (parseResult) {
