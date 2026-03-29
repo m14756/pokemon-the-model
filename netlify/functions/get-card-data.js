@@ -94,11 +94,11 @@ const SET_NAME_MAPPINGS = {
   // Galarian Gallery cards are in a separate set
   'crown zenith galarian gallery': 'Crown Zenith: Galarian Gallery',
   'crown zenith: galarian gallery': 'Crown Zenith: Galarian Gallery',
-  // Trainer Gallery subsets
-  'silver tempest trainer gallery': 'Silver Tempest: Trainer Gallery',
-  'lost origin trainer gallery': 'Lost Origin: Trainer Gallery',
-  'astral radiance trainer gallery': 'Astral Radiance: Trainer Gallery',
-  'brilliant stars trainer gallery': 'Brilliant Stars: Trainer Gallery',
+  // Trainer Gallery subsets - PriceTracker uses "Trainer Gallery" suffix
+  'silver tempest trainer gallery': 'Silver Tempest Trainer Gallery',
+  'lost origin trainer gallery': 'Lost Origin Trainer Gallery',
+  'astral radiance trainer gallery': 'Astral Radiance Trainer Gallery',
+  'brilliant stars trainer gallery': 'Brilliant Stars Trainer Gallery',
   // Celebrations Classic Collection
   'celebrations classic collection': 'Celebrations: Classic Collection',
   'celebrations: classic collection': 'Celebrations: Classic Collection',
@@ -106,6 +106,9 @@ const SET_NAME_MAPPINGS = {
   'scarlet & violet black star promos': 'SV: Scarlet & Violet Promo Cards',
   'sv black star promos': 'SV: Scarlet & Violet Promo Cards',
   'sv promo': 'SV: Scarlet & Violet Promo Cards',
+  // Pokemon GO set
+  'pokémon go': 'Pokemon GO',
+  'pokemon go': 'Pokemon GO',
 };
 
 // Clean and map set name for PriceTracker
@@ -119,16 +122,19 @@ const cleanSetNameForPriceTracker = (setName) => {
     return SET_NAME_MAPPINGS[lowerSet];
   }
   
-  // For subsets, keep the full name (PriceTracker has them as separate sets)
-  // e.g., "Crown Zenith Galarian Gallery" should stay as "Crown Zenith: Galarian Gallery"
+  // For Trainer Gallery subsets, PriceTracker might have them under the main set
+  // e.g., "Brilliant Stars Trainer Gallery" -> "Brilliant Stars"
+  // The TG card number (TG23) should help identify the specific card
+  if (lowerSet.includes('trainer gallery')) {
+    const baseName = setName.replace(/[:\s]*trainer gallery/i, '').trim();
+    console.log(`Trainer Gallery card - using base set name: ${baseName}`);
+    return baseName;
+  }
+  
+  // For Galarian Gallery, keep the full name as they're separate sets on PriceTracker
   if (lowerSet.includes('galarian gallery')) {
     const baseName = setName.replace(/[:\s]*galarian gallery/i, '').trim();
     return `${baseName}: Galarian Gallery`;
-  }
-  
-  if (lowerSet.includes('trainer gallery')) {
-    const baseName = setName.replace(/[:\s]*trainer gallery/i, '').trim();
-    return `${baseName}: Trainer Gallery`;
   }
   
   if (lowerSet.includes('classic collection')) {
