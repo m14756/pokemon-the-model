@@ -195,6 +195,7 @@ export const fetchCardData = async (card) => {
         set: card.set,
         number: card.number,
         priceTrackerId: card.priceTrackerId || null,
+        skipCache: true, // Always get fresh data when resyncing
       }),
     });
     
