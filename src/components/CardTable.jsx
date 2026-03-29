@@ -199,6 +199,7 @@ const CardTable = () => {
               nearMint: newData.pricing?.nearMint ?? card.pricing?.nearMint,
               psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
               psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
+              priceMultiple: newData.pricing?.priceMultiple ?? card.pricing?.priceMultiple,
               lastUpdated: new Date().toISOString(),
             },
             imageUrl: newData.imageUrl || card.imageUrl,
@@ -212,6 +213,7 @@ const CardTable = () => {
                 price_nm: newData.pricing?.nearMint ?? card.pricing?.nearMint,
                 price_psa9: newData.pricing?.psa9 ?? card.pricing?.psa9,
                 price_psa10: newData.pricing?.psa10 ?? card.pricing?.psa10,
+                price_multiple: newData.pricing?.priceMultiple ?? card.pricing?.priceMultiple,
                 image_url: newData.imageUrl || card.imageUrl,
               });
             } catch (dbError) {
