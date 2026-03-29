@@ -102,6 +102,10 @@ const SET_NAME_MAPPINGS = {
   // Celebrations Classic Collection
   'celebrations classic collection': 'Celebrations: Classic Collection',
   'celebrations: classic collection': 'Celebrations: Classic Collection',
+  // SV Promo cards - PriceTracker uses different name
+  'scarlet & violet black star promos': 'SV: Scarlet & Violet Promo Cards',
+  'sv black star promos': 'SV: Scarlet & Violet Promo Cards',
+  'sv promo': 'SV: Scarlet & Violet Promo Cards',
 };
 
 // Clean and map set name for PriceTracker
